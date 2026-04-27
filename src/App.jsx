@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef } from 'react';
 import { MdOutlineSaveAs } from 'react-icons/md';
 
 const LOCAL_STORAGE_KEY = 'cvEditorData';
-const CURRENT_TEMPLATE_VERSION = 3;
+const CURRENT_TEMPLATE_VERSION = 4;
 const EXPERIENCE_JOB_SELECTOR = '.experience-container .panel .job';
+const ADDITIONAL_SECTION_SELECTOR = '.additional-section';
 
 const fifthExperienceMarkup = `
   <div class="job">
@@ -14,6 +15,13 @@ const fifthExperienceMarkup = `
       <li>Call out achievements that demonstrate transferable skills.</li>
     </ul>
   </div>
+`;
+
+const additionalSectionMarkup = `
+  <section class="panel additional-section" data-testid="additional-section">
+    <h3>Additional Information</h3>
+    <p>Add extra achievements, projects, certifications, or volunteer work here.</p>
+  </section>
 `;
 
 function readStoredCvData() {
@@ -60,6 +68,7 @@ function migrateDocumentHtml(documentHtml, templateVersion) {
   wrapper.innerHTML = documentHtml;
 
   const experiencePanel = wrapper.querySelector('.experience-container .panel');
+  const hasAdditionalSection = wrapper.querySelector(ADDITIONAL_SECTION_SELECTOR);
 
   if (!experiencePanel) {
     return documentHtml;
@@ -67,11 +76,15 @@ function migrateDocumentHtml(documentHtml, templateVersion) {
 
   const existingJobs = experiencePanel.querySelectorAll(EXPERIENCE_JOB_SELECTOR);
 
-  if (existingJobs.length >= 5) {
-    return wrapper.innerHTML;
+  if (existingJobs.length < 5) {
+    experiencePanel.insertAdjacentHTML('beforeend', fifthExperienceMarkup);
   }
 
-  experiencePanel.insertAdjacentHTML('beforeend', fifthExperienceMarkup);
+  if (!hasAdditionalSection) {
+    const contentGrid = wrapper.querySelector('.content-grid');
+    contentGrid?.insertAdjacentHTML('afterend', additionalSectionMarkup);
+  }
+
   return wrapper.innerHTML;
 }
 
@@ -272,6 +285,11 @@ function App() {
                 </div>
               </section>
             </section>
+          </section>
+
+          <section className="panel additional-section" data-testid="additional-section">
+            <h3>Additional Information</h3>
+            <p>Add extra achievements, projects, certifications, or volunteer work here.</p>
           </section>
         </article>
       </section>
