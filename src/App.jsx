@@ -2,7 +2,19 @@ import { useCallback, useEffect, useRef } from 'react';
 import { MdOutlineSaveAs } from 'react-icons/md';
 
 const LOCAL_STORAGE_KEY = 'cvEditorData';
-const CURRENT_TEMPLATE_VERSION = 2;
+const CURRENT_TEMPLATE_VERSION = 3;
+const EXPERIENCE_JOB_SELECTOR = '.experience-container .panel .job';
+
+const fifthExperienceMarkup = `
+  <div class="job">
+    <h4>Your Job Title Goes Here</h4>
+    <p class="job-meta">Company Name | Jan 2012 - Dec 2013</p>
+    <p>Highlight earlier relevant experience to show the breadth of your background.</p>
+    <ul>
+      <li>Call out achievements that demonstrate transferable skills.</li>
+    </ul>
+  </div>
+`;
 
 function readStoredCvData() {
   const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -39,6 +51,30 @@ function writeStoredCvData(documentHtml) {
   window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(payload));
 }
 
+function migrateDocumentHtml(documentHtml, templateVersion) {
+  if (templateVersion >= CURRENT_TEMPLATE_VERSION) {
+    return documentHtml;
+  }
+
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = documentHtml;
+
+  const experiencePanel = wrapper.querySelector('.experience-container .panel');
+
+  if (!experiencePanel) {
+    return documentHtml;
+  }
+
+  const existingJobs = experiencePanel.querySelectorAll(EXPERIENCE_JOB_SELECTOR);
+
+  if (existingJobs.length >= 5) {
+    return wrapper.innerHTML;
+  }
+
+  experiencePanel.insertAdjacentHTML('beforeend', fifthExperienceMarkup);
+  return wrapper.innerHTML;
+}
+
 function App() {
   const cvRef = useRef(null);
 
@@ -67,8 +103,21 @@ function App() {
 
     const storedCvData = readStoredCvData();
 
-    if (storedCvData?.documentHtml && storedCvData.templateVersion === CURRENT_TEMPLATE_VERSION) {
-      cvRef.current.innerHTML = storedCvData.documentHtml;
+    if (storedCvData?.documentHtml) {
+      const migratedDocumentHtml = migrateDocumentHtml(
+        storedCvData.documentHtml,
+        storedCvData.templateVersion
+      );
+
+      cvRef.current.innerHTML = migratedDocumentHtml;
+
+      if (
+        storedCvData.templateVersion !== CURRENT_TEMPLATE_VERSION ||
+        storedCvData.documentHtml !== migratedDocumentHtml
+      ) {
+        writeStoredCvData(migratedDocumentHtml);
+      }
+
       return;
     }
 
@@ -210,6 +259,15 @@ function App() {
                   <p>Include your earlier experience when it supports the role you're applying for.</p>
                   <ul>
                     <li>Keep each point concise and focused on impact.</li>
+                  </ul>
+                </div>
+
+                <div className="job">
+                  <h4>Your Job Title Goes Here</h4>
+                  <p className="job-meta">Company Name | Jan 2012 - Dec 2013</p>
+                  <p>Highlight earlier relevant experience to show the breadth of your background.</p>
+                  <ul>
+                    <li>Call out achievements that demonstrate transferable skills.</li>
                   </ul>
                 </div>
               </section>
