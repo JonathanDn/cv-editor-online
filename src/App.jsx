@@ -16,10 +16,18 @@ function App() {
       <header className="toolbar" aria-label="CV editor controls">
         <h1>CV Editor</h1>
         <p>Click any text in the template to edit it.</p>
-        <button type="button" className="save-pdf-button" onClick={handleSaveAsPdf}>
-          Save as PDF
-        </button>
       </header>
+
+      <section className="cv-shell">
+        <button
+          type="button"
+          className="save-pdf-button"
+          onClick={handleSaveAsPdf}
+          aria-label="Save as PDF"
+          title="Save as PDF"
+        >
+          <span className="save-pdf-icon" aria-hidden="true">⭳</span>
+        </button>
 
       <article
         className="cv-document"
@@ -133,6 +141,7 @@ function App() {
           </section>
         </section>
       </article>
+      </section>
     </main>
   );
 }
