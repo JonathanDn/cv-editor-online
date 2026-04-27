@@ -125,6 +125,10 @@ body {
   grid-template-columns: 31% 69%;
 }
 
+.additional-section {
+  margin-top: 1.7rem;
+}
+
 .left-column {
   border-right: 1px solid var(--divider);
   padding-right: 1.3rem;

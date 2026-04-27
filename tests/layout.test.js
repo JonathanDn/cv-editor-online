@@ -12,6 +12,8 @@ test('names containers for profile, contact, and experience sections', () => {
   assert.match(appSource, /data-testid="contact-container"/);
   assert.match(appSource, /className="experience-container right-column"/);
   assert.match(appSource, /data-testid="experience-container"/);
+  assert.match(appSource, /className="panel additional-section"/);
+  assert.match(appSource, /data-testid="additional-section"/);
 });
 
 test('includes five experience entries in the template', () => {
@@ -31,6 +33,14 @@ test('collapses to single column only at the mobile breakpoint', () => {
     stylesSource,
     /@media\s*\(width <= 760px\)\s*\{[\s\S]*?\.content-grid\s*\{[\s\S]*?grid-template-columns:\s*1fr;/
   );
+});
+
+test('places the additional section beneath the two-column grid', () => {
+  assert.match(
+    appSource,
+    /<section className="content-grid"[\s\S]*?<\/section>\s*<section className="panel additional-section"/
+  );
+  assert.match(stylesSource, /\.additional-section\s*\{[\s\S]*?margin-top:\s*1\.7rem;/);
 });
 
 test('preserves two-column layout in print/PDF output', () => {
