@@ -41,6 +41,22 @@ body {
   color: var(--muted);
 }
 
+.save-pdf-button {
+  margin-top: 1rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.95rem;
+  padding: 0.55rem 1rem;
+  cursor: pointer;
+}
+
+.save-pdf-button:hover {
+  background: #1e40af;
+}
+
 .cv-document {
   width: min(100%, 980px);
   background: var(--paper);
@@ -177,5 +193,25 @@ body {
   .main-content,
   .sidebar {
     padding: 1.6rem;
+  }
+}
+
+@media print {
+  body {
+    background: #fff;
+  }
+
+  .page {
+    padding: 0;
+  }
+
+  .toolbar {
+    display: none;
+  }
+
+  .cv-document {
+    width: 100%;
+    box-shadow: none;
+    border-radius: 0;
   }
 }
