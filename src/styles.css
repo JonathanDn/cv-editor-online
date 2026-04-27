@@ -203,7 +203,7 @@ body {
   line-height: 1.33;
 }
 
-@media (width <= 920px) {
+@media (width <= 760px) {
   .cv-document {
     width: 100%;
     min-height: auto;
@@ -281,5 +281,20 @@ body {
     margin: 0;
     break-inside: avoid-page;
     page-break-inside: avoid;
+  }
+
+  .content-grid {
+    grid-template-columns: 31% 69%;
+    gap: 0;
+  }
+
+  .left-column {
+    border-right: 1px solid var(--divider);
+    border-bottom: 0;
+    padding: 0 1.3rem 0 0;
+  }
+
+  .right-column {
+    padding: 0 0 0 1.3rem;
   }
 }
