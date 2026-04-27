@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Editable CV Template</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="toolbar" contenteditable="false">
+        <h1>CV Editor</h1>
+        <p>Click any text in the template to edit it.</p>
+      </header>
+
+      <article class="cv-document" contenteditable="true" spellcheck="false" aria-label="Editable CV template">
+        <section class="sidebar">
+          <div class="avatar">AJ</div>
+
+          <h2 class="name">Alex Johnson</h2>
+          <p class="title">Senior Product Designer</p>
+
+          <section class="block">
+            <h3>Contact</h3>
+            <p>+1 (555) 321-9988</p>
+            <p>alex.johnson@email.com</p>
+            <p>San Francisco, CA</p>
+            <p>linkedin.com/in/alexjohnson</p>
+          </section>
+
+          <section class="block">
+            <h3>Skills</h3>
+            <ul>
+              <li>UI / UX Design</li>
+              <li>Design Systems</li>
+              <li>Figma & Adobe XD</li>
+              <li>Wireframing</li>
+              <li>Prototyping</li>
+              <li>Team Leadership</li>
+            </ul>
+          </section>
+
+          <section class="block">
+            <h3>Languages</h3>
+            <p>English — Native</p>
+            <p>Spanish — Fluent</p>
+            <p>French — Intermediate</p>
+          </section>
+        </section>
+
+        <section class="main-content">
+          <section class="summary">
+            <h3>Profile</h3>
+            <p>
+              Creative and detail-oriented product designer with 8+ years of experience crafting digital
+              products that blend usability, accessibility, and visual storytelling. Passionate about building
+              meaningful user experiences and mentoring cross-functional teams.
+            </p>
+          </section>
+
+          <section class="resume-section">
+            <h3>Work Experience</h3>
+
+            <div class="entry">
+              <div class="entry-header">
+                <h4>Lead Product Designer</h4>
+                <span>2022 — Present</span>
+              </div>
+              <p class="meta">Brightline Tech · San Francisco, CA</p>
+              <ul>
+                <li>Led end-to-end design for SaaS products used by 120k+ monthly active users.</li>
+                <li>Built a component library that reduced design-to-dev handoff time by 35%.</li>
+                <li>Collaborated with product and engineering to improve activation rate by 24%.</li>
+              </ul>
+            </div>
+
+            <div class="entry">
+              <div class="entry-header">
+                <h4>Product Designer</h4>
+                <span>2019 — 2022</span>
+              </div>
+              <p class="meta">North Harbor Studio · Los Angeles, CA</p>
+              <ul>
+                <li>Designed responsive dashboard workflows for fintech and healthcare clients.</li>
+                <li>Ran user research sessions and translated insights into measurable UX changes.</li>
+                <li>Improved task completion rates by 19% through iterative prototype testing.</li>
+              </ul>
+            </div>
+          </section>
+
+          <section class="resume-section">
+            <h3>Education</h3>
+
+            <div class="entry">
+              <div class="entry-header">
+                <h4>M.S. Human-Computer Interaction</h4>
+                <span>2017 — 2019</span>
+              </div>
+              <p class="meta">University of Washington</p>
+            </div>
+
+            <div class="entry">
+              <div class="entry-header">
+                <h4>B.A. Graphic Design</h4>
+                <span>2013 — 2017</span>
+              </div>
+              <p class="meta">California College of the Arts</p>
+            </div>
+          </section>
+
+          <section class="resume-section">
+            <h3>Certifications</h3>
+            <p>Google UX Design Professional Certificate</p>
+            <p>NN/g UX Certification</p>
+          </section>
+        </section>
+      </article>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>
