@@ -1,6 +1,10 @@
 import { useCallback } from 'react';
 
 function App() {
+  const handleSaveAsPdf = useCallback(() => {
+    window.print();
+  }, []);
+
   const handlePaste = useCallback((event) => {
     event.preventDefault();
     const text = event.clipboardData?.getData('text/plain') ?? '';
@@ -12,6 +16,9 @@ function App() {
       <header className="toolbar" aria-label="CV editor controls">
         <h1>CV Editor</h1>
         <p>Click any text in the template to edit it.</p>
+        <button type="button" className="save-pdf-button" onClick={handleSaveAsPdf}>
+          Save as PDF
+        </button>
       </header>
 
       <article
