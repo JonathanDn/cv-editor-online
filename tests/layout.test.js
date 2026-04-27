@@ -14,6 +14,11 @@ test('names containers for profile, contact, and experience sections', () => {
   assert.match(appSource, /data-testid="experience-container"/);
 });
 
+test('includes four experience entries in the template', () => {
+  const jobEntries = appSource.match(/<div className="job">/g) ?? [];
+  assert.equal(jobEntries.length, 4);
+});
+
 test('keeps contact and experience side-by-side on default layout width', () => {
   assert.match(
     stylesSource,

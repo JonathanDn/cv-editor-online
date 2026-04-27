@@ -196,6 +196,15 @@ function App() {
                     <li>Avoid clichés and tell the truth. Use active verbs.</li>
                   </ul>
                 </div>
+
+                <div className="job">
+                  <h4>Your Job Title Goes Here</h4>
+                  <p className="job-meta">Company Name | Jan 2014 - Aug 2016</p>
+                  <p>Include your earlier experience when it supports the role you're applying for.</p>
+                  <ul>
+                    <li>Keep each point concise and focused on impact.</li>
+                  </ul>
+                </div>
               </section>
             </section>
           </section>
