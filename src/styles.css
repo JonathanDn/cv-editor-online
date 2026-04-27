@@ -1,0 +1,384 @@
+@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@700&family=Montserrat:wght@300;400;500;600;700;800&display=swap");
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Montserrat", Arial, sans-serif;
+  background: #d8dfdc;
+  color: #171717;
+}
+
+.app {
+  min-height: 100vh;
+}
+
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: center;
+  padding: 16px 24px;
+  background: rgba(216, 223, 220, 0.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.toolbar h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.toolbar p {
+  margin: 4px 0 0;
+  font-size: 14px;
+  opacity: 0.65;
+}
+
+.toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  background: white;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+}
+
+.toolbar-btn.dark {
+  background: black;
+  color: white;
+}
+
+.toolbar-btn input {
+  width: 32px;
+  height: 24px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.print-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 40px 16px;
+}
+
+.cv-page {
+  position: relative;
+  overflow: hidden;
+  width: 900px;
+  min-height: 1273px;
+  background: #f7f6f5;
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.25);
+  transition: all 250ms ease;
+}
+
+.cv-page.phone-preview {
+  width: 390px;
+  min-height: 551px;
+}
+
+.brand-panel {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 31%;
+  background: #43504f;
+  color: white;
+}
+
+.brand-text {
+  position: absolute;
+  bottom: 9%;
+  left: 25%;
+  transform: rotate(-90deg);
+  transform-origin: left;
+  white-space: nowrap;
+}
+
+.brand-main {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 66px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.brand-sub {
+  margin-left: 70px;
+  margin-top: -5px;
+  font-size: 31px;
+  font-weight: 300;
+  letter-spacing: 0.34em;
+}
+
+.cv-content {
+  position: relative;
+  margin-left: 31%;
+  min-height: 1273px;
+  padding: 8.5% 6%;
+  background: #f7f6f5;
+}
+
+.cv-header {
+  text-align: center;
+}
+
+.name-row {
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: 20px;
+  letter-spacing: 0.28em;
+}
+
+.first-name,
+.last-name {
+  font-size: 52px;
+  line-height: 1;
+}
+
+.first-name {
+  font-weight: 300;
+}
+
+.last-name {
+  font-weight: 800;
+}
+
+.professional-title {
+  max-width: 520px;
+  margin: 28px auto 0;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.52em;
+}
+
+.summary {
+  max-width: 650px;
+  margin: 40px auto 0;
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.cv-grid {
+  display: grid;
+  grid-template-columns: 31% 1fr;
+  gap: 32px;
+  margin-top: 64px;
+}
+
+.left-column {
+  padding-right: 28px;
+  border-right: 1px solid rgba(0, 0, 0, 0.16);
+  text-align: right;
+}
+
+.right-column {
+  padding-left: 8px;
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.42em;
+}
+
+.contact-list,
+.education-list,
+.experience-list {
+  margin-top: 28px;
+}
+
+.contact-list {
+  display: grid;
+  gap: 16px;
+  font-size: 13.5px;
+}
+
+.education-list {
+  display: grid;
+  gap: 28px;
+}
+
+.education-item,
+.experience-item {
+  position: relative;
+}
+
+.qualification,
+.job-role {
+  font-size: 14px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+}
+
+.small-text {
+  margin-top: 8px;
+  font-size: 13.5px;
+}
+
+.small-divider {
+  width: 48px;
+  height: 1px;
+  margin: 48px 0 48px auto;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.job-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 13.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.24em;
+}
+
+.job-description {
+  margin-top: 24px;
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+
+.experience-list {
+  display: grid;
+  gap: 40px;
+}
+
+.editable-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.editable-list-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.bullet {
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+.list-text {
+  flex: 1;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.editable {
+  outline: none;
+  border-radius: 6px;
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.editable:hover,
+.editable:focus {
+  background: rgba(0, 0, 0, 0.035);
+  box-shadow: 0 0 0 5px rgba(0, 0, 0, 0.035);
+}
+
+.editable:empty::before {
+  content: attr(data-placeholder);
+  opacity: 0.38;
+}
+
+.mini-btn {
+  width: 22px;
+  height: 22px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 999px;
+  background: white;
+  font-size: 16px;
+  line-height: 17px;
+  cursor: pointer;
+}
+
+.add-btn {
+  margin-top: 14px;
+  padding: 5px 11px;
+  border: 1px dashed rgba(0, 0, 0, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.35);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.remove-education {
+  position: absolute;
+  top: 0;
+  left: -28px;
+}
+
+.remove-experience {
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  html,
+  body,
+  #root {
+    background: white;
+  }
+
+  .screen-only {
+    display: none !important;
+  }
+
+  .print-wrap {
+    padding: 0;
+    margin: 0;
+    background: white;
+  }
+
+  .cv-page {
+    width: 210mm;
+    min-height: 297mm;
+    box-shadow: none;
+  }
+
+  .editable:hover,
+  .editable:focus {
+    background: transparent;
+    box-shadow: none;
+  }
+}
+
+@media (max-width: 800px) {
+  .toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .cv-page {
+    transform-origin: top center;
+  }
+}
