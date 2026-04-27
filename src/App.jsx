@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { MdOutlineSaveAs } from 'react-icons/md';
 
 function App() {
   const handleSaveAsPdf = useCallback(() => {
@@ -26,7 +27,7 @@ function App() {
           aria-label="Save as PDF"
           title="Save as PDF"
         >
-          <span className="save-pdf-icon" aria-hidden="true">⭳</span>
+          <MdOutlineSaveAs className="save-pdf-icon" aria-hidden="true" focusable="false" />
         </button>
 
       <article
