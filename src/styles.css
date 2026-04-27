@@ -1,12 +1,10 @@
 :root {
-  --bg: #f2f4f8;
-  --paper: #ffffff;
-  --ink: #1f2937;
-  --muted: #6b7280;
-  --accent: #1d4ed8;
-  --accent-soft: #eff6ff;
-  --sidebar: #111827;
-  font-family: Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: 'Poppins', 'Avenir Next', 'Segoe UI', Arial, sans-serif;
+  --page-bg: #efefef;
+  --paper: #f7f7f7;
+  --text: #202020;
+  --muted: #6a6a6a;
+  --divider: #d8d8d8;
 }
 
 * {
@@ -15,8 +13,8 @@
 
 body {
   margin: 0;
-  background: linear-gradient(135deg, #eef2ff 0%, var(--bg) 60%);
-  color: var(--ink);
+  background: var(--page-bg);
+  color: var(--text);
 }
 
 .page {
@@ -33,7 +31,7 @@ body {
 
 .toolbar h1 {
   margin: 0;
-  font-size: 1.4rem;
+  font-size: 1.35rem;
 }
 
 .toolbar p {
@@ -41,177 +39,247 @@ body {
   color: var(--muted);
 }
 
+.cv-shell {
+  position: relative;
+  width: min(100%, 210mm);
+}
+
 .save-pdf-button {
-  margin-top: 1rem;
+  position: absolute;
+  top: 0.9rem;
+  right: 0.9rem;
+  z-index: 5;
+  width: 2.9rem;
+  height: 2.9rem;
   border: 0;
-  border-radius: 999px;
-  background: var(--accent);
+  border-radius: 50%;
+  background: rgb(30 30 30 / 92%);
   color: #fff;
-  font-weight: 600;
-  font-size: 0.95rem;
-  padding: 0.55rem 1rem;
+  display: grid;
+  place-items: center;
   cursor: pointer;
+  box-shadow: 0 8px 18px rgb(0 0 0 / 26%);
 }
 
 .save-pdf-button:hover {
-  background: #1e40af;
+  background: #000;
+}
+
+.save-pdf-icon {
+  font-size: 1.25rem;
+  line-height: 1;
 }
 
 .cv-document {
-  width: min(100%, 980px);
+  width: 100%;
+  min-height: 297mm;
   background: var(--paper);
-  border-radius: 18px;
+  padding: 15mm;
+  box-shadow: 0 18px 50px rgb(0 0 0 / 12%);
   overflow: hidden;
-  box-shadow: 0 20px 60px rgb(17 24 39 / 15%);
-  display: grid;
-  grid-template-columns: 320px 1fr;
-  min-height: 1200px;
-  line-height: 1.5;
 }
 
 .cv-document:focus {
-  outline: 3px solid rgb(29 78 216 / 40%);
-  outline-offset: 4px;
+  outline: 2px solid #8f8f8f;
+  outline-offset: 3px;
 }
 
-.sidebar {
-  background: var(--sidebar);
-  color: #f9fafb;
-  padding: 2.3rem 2rem;
+.hero {
+  text-align: center;
 }
 
-.avatar {
-  width: 84px;
-  height: 84px;
-  border-radius: 50%;
-  background: linear-gradient(145deg, #2563eb, #3b82f6);
-  display: grid;
-  place-items: center;
+.hero-name {
+  margin: 0;
+  font-size: 2.35rem;
+  letter-spacing: 0.22em;
+  font-weight: 300;
+}
+
+.hero-first {
+  font-weight: 300;
+}
+
+.hero-last {
   font-weight: 700;
-  letter-spacing: 0.04em;
-  font-size: 1.5rem;
+  margin-left: 0.55rem;
 }
 
-.name {
-  margin: 1.1rem 0 0.2rem;
-  font-size: 1.6rem;
-  line-height: 1.2;
+.hero-title {
+  margin: 0.7rem 0 0;
+  font-size: 1.1rem;
+  letter-spacing: 0.35em;
+  font-weight: 400;
 }
 
-.title {
-  margin: 0 0 1.6rem;
-  color: #bfdbfe;
+.hero-summary {
+  margin: 1.2rem 0 0;
+  width: 100%;
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
+.content-grid {
+  margin-top: 1.7rem;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 31% 69%;
+}
+
+.left-column {
+  border-right: 1px solid var(--divider);
+  padding-right: 1.3rem;
+}
+
+.right-column {
+  padding-left: 1.3rem;
+}
+
+.panel,
+.item,
+.job {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.panel + .panel {
+  margin-top: 1.35rem;
+}
+
+.panel h3 {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.34em;
+  font-size: 1.03rem;
   font-weight: 500;
 }
 
-.block {
-  margin-top: 1.5rem;
+.left-column .panel h3 {
+  text-align: center;
 }
 
-.block h3 {
-  margin: 0 0 0.55rem;
-  font-size: 0.95rem;
+.left-column .panel p,
+.left-column .panel h4 {
+  text-align: center;
+}
+
+.panel h4 {
+  margin: 0.72rem 0 0;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #93c5fd;
+  font-size: 0.95rem;
 }
 
-.block p,
-.block li {
-  font-size: 0.95rem;
+.panel p {
+  margin: 0.32rem 0 0;
+  line-height: 1.36;
+  font-size: 0.9rem;
+}
+
+.item {
+  margin-top: 0.92rem;
+}
+
+.job {
+  margin-top: 0.9rem;
+}
+
+.job:first-of-type {
+  margin-top: 0.86rem;
+}
+
+.job-meta {
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.job ul {
+  margin: 0.28rem 0 0;
+  padding-left: 1rem;
+}
+
+.job li {
   margin: 0.2rem 0;
+  line-height: 1.33;
 }
 
-.block ul {
-  margin: 0;
-  padding-left: 1.15rem;
-}
-
-.main-content {
-  padding: 2.3rem 2.4rem;
-}
-
-.main-content h3 {
-  margin: 0 0 0.7rem;
-  font-size: 1.05rem;
-  text-transform: uppercase;
-  color: var(--accent);
-  letter-spacing: 0.08em;
-}
-
-.summary p {
-  margin: 0;
-  color: #374151;
-}
-
-.resume-section {
-  margin-top: 1.8rem;
-}
-
-.entry + .entry {
-  margin-top: 1.2rem;
-}
-
-.entry-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  align-items: baseline;
-}
-
-.entry-header h4 {
-  margin: 0;
-  font-size: 1.03rem;
-}
-
-.entry-header span {
-  font-size: 0.92rem;
-  color: var(--muted);
-  font-weight: 600;
-  background: var(--accent-soft);
-  padding: 0.15rem 0.5rem;
-  border-radius: 999px;
-}
-
-.meta {
-  margin: 0.12rem 0 0.45rem;
-  color: #4b5563;
-  font-size: 0.93rem;
-}
-
-.entry ul {
-  margin: 0;
-  padding-left: 1.2rem;
-}
-
-@media (width <= 860px) {
+@media (width <= 920px) {
   .cv-document {
-    grid-template-columns: 1fr;
-    min-height: unset;
+    width: 100%;
+    min-height: auto;
+    padding: 2rem 1.5rem;
   }
 
-  .main-content,
-  .sidebar {
-    padding: 1.6rem;
+  .save-pdf-button {
+    top: 0.6rem;
+    right: 0.6rem;
+    width: 2.6rem;
+    height: 2.6rem;
   }
+
+  .hero-name {
+    font-size: 2.1rem;
+    letter-spacing: 0.13em;
+  }
+
+  .hero-title,
+  .panel h3 {
+    font-size: 1.02rem;
+    letter-spacing: 0.22em;
+  }
+
+  .content-grid {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+
+  .left-column {
+    border-right: 0;
+    border-bottom: 1px solid var(--divider);
+    padding: 0 0 2rem;
+  }
+
+  .right-column {
+    padding: 0;
+  }
+}
+
+@page {
+  size: A4;
+  margin: 0;
 }
 
 @media print {
+  html,
   body {
+    width: 210mm;
+    height: 297mm;
+    margin: 0;
+    padding: 0;
     background: #fff;
   }
 
   .page {
     padding: 0;
+    display: block;
   }
 
   .toolbar {
     display: none;
   }
 
+  .save-pdf-button {
+    display: none;
+  }
+
   .cv-document {
-    width: 100%;
+    width: 210mm;
+    min-height: 297mm;
+    height: 297mm;
     box-shadow: none;
-    border-radius: 0;
+    padding: 15mm;
+    margin: 0;
+    break-inside: avoid-page;
+    page-break-inside: avoid;
   }
 }
