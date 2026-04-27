@@ -1,0 +1,25 @@
+{
+  "name": "cv-editor-online",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "rollup": "^4.52.5",
+    "vite": "^5.4.19"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-darwin-arm64": "^4.52.5",
+    "@rollup/rollup-linux-x64-gnu": "^4.52.5",
+    "@rollup/rollup-win32-x64-msvc": "^4.52.5"
+  }
+}
