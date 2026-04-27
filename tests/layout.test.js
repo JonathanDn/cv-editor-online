@@ -27,3 +27,19 @@ test('collapses to single column only at the mobile breakpoint', () => {
     /@media\s*\(width <= 760px\)\s*\{[\s\S]*?\.content-grid\s*\{[\s\S]*?grid-template-columns:\s*1fr;/
   );
 });
+
+test('preserves two-column layout in print/PDF output', () => {
+  assert.match(stylesSource, /@media print\s*\{/);
+  assert.match(
+    stylesSource,
+    /@media print\s*\{[\s\S]*?\.cv-document\s*\{[\s\S]*?width:\s*210mm;[\s\S]*?height:\s*297mm;/
+  );
+  assert.match(
+    stylesSource,
+    /@media print\s*\{[\s\S]*?\.content-grid\s*\{[\s\S]*?grid-template-columns:\s*31%\s*69%;/
+  );
+  assert.match(
+    stylesSource,
+    /@media print\s*\{[\s\S]*?\.left-column\s*\{[\s\S]*?border-right:\s*1px solid var\(--divider\);/
+  );
+});
