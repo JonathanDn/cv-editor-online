@@ -38,7 +38,7 @@ function App() {
         aria-label="Editable CV template"
         onPaste={handlePaste}
       >
-        <header className="hero">
+        <header className="profile-container hero" data-testid="profile-container">
           <h2 className="hero-name">
             <span className="hero-first">JANE</span>
             <span className="hero-last">AUSTEN</span>
@@ -51,8 +51,8 @@ function App() {
           </p>
         </header>
 
-        <section className="content-grid">
-          <aside className="left-column">
+        <section className="content-grid" data-testid="columns-container">
+          <aside className="contact-container left-column" data-testid="contact-container">
             <section className="panel">
               <h3>Contact</h3>
               <p>+1 123 1234 1123 ☎</p>
@@ -94,7 +94,7 @@ function App() {
             </section>
           </aside>
 
-          <section className="right-column">
+          <section className="experience-container right-column" data-testid="experience-container">
             <section className="panel">
               <h3>Experience</h3>
 
