@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { MdOutlineSaveAs } from 'react-icons/md';
 
 const LOCAL_STORAGE_KEY = 'cvEditorData';
+const CURRENT_TEMPLATE_VERSION = 2;
 
 function readStoredCvData() {
   const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -13,7 +14,12 @@ function readStoredCvData() {
   try {
     const parsed = JSON.parse(raw);
 
-    if (parsed && typeof parsed === 'object' && typeof parsed.documentHtml === 'string') {
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      typeof parsed.documentHtml === 'string' &&
+      typeof parsed.templateVersion === 'number'
+    ) {
       return parsed;
     }
   } catch {
@@ -26,6 +32,7 @@ function readStoredCvData() {
 function writeStoredCvData(documentHtml) {
   const payload = {
     documentHtml,
+    templateVersion: CURRENT_TEMPLATE_VERSION,
     updatedAt: new Date().toISOString(),
   };
 
@@ -60,7 +67,7 @@ function App() {
 
     const storedCvData = readStoredCvData();
 
-    if (storedCvData?.documentHtml) {
+    if (storedCvData?.documentHtml && storedCvData.templateVersion === CURRENT_TEMPLATE_VERSION) {
       cvRef.current.innerHTML = storedCvData.documentHtml;
       return;
     }
