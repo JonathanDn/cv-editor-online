@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { MdOutlineSaveAs } from 'react-icons/md';
 
 const LOCAL_STORAGE_KEY = 'cvEditorData';
 const CURRENT_TEMPLATE_VERSION = 4;
 const EXPERIENCE_JOB_SELECTOR = '.experience-container .panel .job';
 const ADDITIONAL_SECTION_SELECTOR = '.additional-section';
+const MAX_UNDO_STATES = 50;
+const MAX_CHECKPOINTS = 8;
+const CHECKPOINT_INTERVAL_MS = 30000;
 
 const fifthExperienceMarkup = `
   <div class="job">
@@ -49,11 +52,12 @@ function readStoredCvData() {
   return null;
 }
 
-function writeStoredCvData(documentHtml) {
+function writeStoredCvData(documentHtml, checkpoints = []) {
   const payload = {
     documentHtml,
     templateVersion: CURRENT_TEMPLATE_VERSION,
     updatedAt: new Date().toISOString(),
+    checkpoints,
   };
 
   window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(payload));
@@ -90,6 +94,52 @@ function migrateDocumentHtml(documentHtml, templateVersion) {
 
 function App() {
   const cvRef = useRef(null);
+  const undoStackRef = useRef([]);
+  const redoStackRef = useRef([]);
+  const checkpointsRef = useRef([]);
+  const lastDocumentHtmlRef = useRef('');
+  const lastCheckpointAtRef = useRef(0);
+  const isApplyingHistoryRef = useRef(false);
+  const [historyState, setHistoryState] = useState({
+    canUndo: false,
+    canRedo: false,
+    canRestore: false,
+  });
+
+  const syncHistoryState = useCallback(() => {
+    setHistoryState({
+      canUndo: undoStackRef.current.length > 0,
+      canRedo: redoStackRef.current.length > 0,
+      canRestore: checkpointsRef.current.length > 0,
+    });
+  }, []);
+
+  const persistDocument = useCallback((documentHtml) => {
+    writeStoredCvData(documentHtml, checkpointsRef.current);
+  }, []);
+
+  const maybeSaveCheckpoint = useCallback((documentHtml) => {
+    const now = Date.now();
+
+    if (now - lastCheckpointAtRef.current < CHECKPOINT_INTERVAL_MS) {
+      return;
+    }
+
+    const lastCheckpoint = checkpointsRef.current.at(-1);
+    if (lastCheckpoint === documentHtml) {
+      return;
+    }
+
+    checkpointsRef.current.push(documentHtml);
+
+    if (checkpointsRef.current.length > MAX_CHECKPOINTS) {
+      checkpointsRef.current.splice(0, checkpointsRef.current.length - MAX_CHECKPOINTS);
+    }
+
+    lastCheckpointAtRef.current = now;
+    persistDocument(documentHtml);
+    syncHistoryState();
+  }, [persistDocument, syncHistoryState]);
 
   const handleSaveAsPdf = useCallback(() => {
     window.print();
@@ -102,12 +152,115 @@ function App() {
   }, []);
 
   const handleInput = useCallback(() => {
+    if (!cvRef.current || isApplyingHistoryRef.current) {
+      return;
+    }
+
+    const currentHtml = cvRef.current.innerHTML;
+    const previousHtml = lastDocumentHtmlRef.current;
+
+    if (currentHtml === previousHtml) {
+      return;
+    }
+
+    if (previousHtml) {
+      undoStackRef.current.push(previousHtml);
+      if (undoStackRef.current.length > MAX_UNDO_STATES) {
+        undoStackRef.current.shift();
+      }
+    }
+
+    redoStackRef.current = [];
+    lastDocumentHtmlRef.current = currentHtml;
+    persistDocument(currentHtml);
+    maybeSaveCheckpoint(currentHtml);
+    syncHistoryState();
+  }, [maybeSaveCheckpoint, persistDocument, syncHistoryState]);
+
+  const applyHistoryState = useCallback((nextHtml) => {
     if (!cvRef.current) {
       return;
     }
 
-    writeStoredCvData(cvRef.current.innerHTML);
-  }, []);
+    isApplyingHistoryRef.current = true;
+    cvRef.current.innerHTML = nextHtml;
+    lastDocumentHtmlRef.current = nextHtml;
+    persistDocument(nextHtml);
+    window.setTimeout(() => {
+      isApplyingHistoryRef.current = false;
+    }, 0);
+    syncHistoryState();
+  }, [persistDocument, syncHistoryState]);
+
+  const handleUndo = useCallback(() => {
+    if (!undoStackRef.current.length) {
+      return;
+    }
+
+    const currentHtml = lastDocumentHtmlRef.current;
+    const previousHtml = undoStackRef.current.pop();
+
+    if (currentHtml) {
+      redoStackRef.current.push(currentHtml);
+    }
+
+    if (previousHtml) {
+      applyHistoryState(previousHtml);
+    }
+  }, [applyHistoryState]);
+
+  const handleRedo = useCallback(() => {
+    if (!redoStackRef.current.length) {
+      return;
+    }
+
+    const currentHtml = lastDocumentHtmlRef.current;
+    const redoHtml = redoStackRef.current.pop();
+
+    if (currentHtml) {
+      undoStackRef.current.push(currentHtml);
+    }
+
+    if (redoHtml) {
+      applyHistoryState(redoHtml);
+    }
+  }, [applyHistoryState]);
+
+  const handleRestoreCheckpoint = useCallback(() => {
+    if (!checkpointsRef.current.length) {
+      return;
+    }
+
+    const currentHtml = lastDocumentHtmlRef.current;
+    const checkpointHtml = checkpointsRef.current.at(-1);
+
+    if (!checkpointHtml || checkpointHtml === currentHtml) {
+      return;
+    }
+
+    if (currentHtml) {
+      undoStackRef.current.push(currentHtml);
+    }
+    redoStackRef.current = [];
+    applyHistoryState(checkpointHtml);
+  }, [applyHistoryState]);
+
+  const handleKeyDown = useCallback((event) => {
+    const modifierPressed = event.metaKey || event.ctrlKey;
+
+    if (!modifierPressed || event.key.toLowerCase() !== 'z') {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (event.shiftKey) {
+      handleRedo();
+      return;
+    }
+
+    handleUndo();
+  }, [handleRedo, handleUndo]);
 
   useEffect(() => {
     if (!cvRef.current) {
@@ -123,19 +276,27 @@ function App() {
       );
 
       cvRef.current.innerHTML = migratedDocumentHtml;
+      lastDocumentHtmlRef.current = migratedDocumentHtml;
+      checkpointsRef.current = Array.isArray(storedCvData.checkpoints)
+        ? storedCvData.checkpoints.filter((checkpoint) => typeof checkpoint === 'string')
+        : [];
+      lastCheckpointAtRef.current = Date.now();
+      syncHistoryState();
 
       if (
         storedCvData.templateVersion !== CURRENT_TEMPLATE_VERSION ||
         storedCvData.documentHtml !== migratedDocumentHtml
       ) {
-        writeStoredCvData(migratedDocumentHtml);
+        writeStoredCvData(migratedDocumentHtml, checkpointsRef.current);
       }
 
       return;
     }
 
-    writeStoredCvData(cvRef.current.innerHTML);
-  }, []);
+    lastDocumentHtmlRef.current = cvRef.current.innerHTML;
+    persistDocument(cvRef.current.innerHTML);
+    syncHistoryState();
+  }, [persistDocument, syncHistoryState]);
 
   return (
     <main className="page">
@@ -145,6 +306,23 @@ function App() {
       </header>
 
       <section className="cv-shell">
+        <div className="history-controls" aria-label="History controls">
+          <button type="button" className="history-button" onClick={handleUndo} disabled={!historyState.canUndo}>
+            Undo
+          </button>
+          <button type="button" className="history-button" onClick={handleRedo} disabled={!historyState.canRedo}>
+            Redo
+          </button>
+          <button
+            type="button"
+            className="history-button"
+            onClick={handleRestoreCheckpoint}
+            disabled={!historyState.canRestore}
+          >
+            Restore
+          </button>
+        </div>
+
         <button
           type="button"
           className="save-pdf-button"
@@ -164,6 +342,7 @@ function App() {
           aria-label="Editable CV template"
           onPaste={handlePaste}
           onInput={handleInput}
+          onKeyDown={handleKeyDown}
         >
           <header className="profile-container hero" data-testid="profile-container">
             <h2 className="hero-name">

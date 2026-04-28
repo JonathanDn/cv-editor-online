@@ -44,6 +44,30 @@ body {
   width: min(100%, 210mm);
 }
 
+.history-controls {
+  position: absolute;
+  top: 0.9rem;
+  left: 0.9rem;
+  z-index: 5;
+  display: flex;
+  gap: 0.4rem;
+}
+
+.history-button {
+  border: 0;
+  border-radius: 999px;
+  background: rgb(30 30 30 / 92%);
+  color: #fff;
+  padding: 0.38rem 0.7rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.history-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .save-pdf-button {
   position: absolute;
   top: 0.9rem;
@@ -219,6 +243,17 @@ body {
     right: 0.6rem;
     width: 2.6rem;
     height: 2.6rem;
+  }
+
+  .history-controls {
+    top: 0.6rem;
+    left: 0.6rem;
+    gap: 0.3rem;
+  }
+
+  .history-button {
+    padding: 0.3rem 0.58rem;
+    font-size: 0.68rem;
   }
 
   .hero-name {
