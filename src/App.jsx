@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { MdOutlineSaveAs } from 'react-icons/md';
 
 const LOCAL_STORAGE_KEY = 'cvEditorData';
 const CURRENT_TEMPLATE_VERSION = 4;
 const EXPERIENCE_JOB_SELECTOR = '.experience-container .panel .job';
 const ADDITIONAL_SECTION_SELECTOR = '.additional-section';
+const MAX_UNDO_STATES = 50;
 
 const fifthExperienceMarkup = `
   <div class="job">
@@ -90,6 +91,25 @@ function migrateDocumentHtml(documentHtml, templateVersion) {
 
 function App() {
   const cvRef = useRef(null);
+  const undoStackRef = useRef([]);
+  const redoStackRef = useRef([]);
+  const lastDocumentHtmlRef = useRef('');
+  const isApplyingHistoryRef = useRef(false);
+  const [historyState, setHistoryState] = useState({
+    canUndo: false,
+    canRedo: false,
+  });
+
+  const syncHistoryState = useCallback(() => {
+    setHistoryState({
+      canUndo: undoStackRef.current.length > 0,
+      canRedo: redoStackRef.current.length > 0,
+    });
+  }, []);
+
+  const persistDocument = useCallback((documentHtml) => {
+    writeStoredCvData(documentHtml);
+  }, []);
 
   const handleSaveAsPdf = useCallback(() => {
     window.print();
@@ -102,12 +122,95 @@ function App() {
   }, []);
 
   const handleInput = useCallback(() => {
+    if (!cvRef.current || isApplyingHistoryRef.current) {
+      return;
+    }
+
+    const currentHtml = cvRef.current.innerHTML;
+    const previousHtml = lastDocumentHtmlRef.current;
+
+    if (currentHtml === previousHtml) {
+      return;
+    }
+
+    if (previousHtml) {
+      undoStackRef.current.push(previousHtml);
+      if (undoStackRef.current.length > MAX_UNDO_STATES) {
+        undoStackRef.current.shift();
+      }
+    }
+
+    redoStackRef.current = [];
+    lastDocumentHtmlRef.current = currentHtml;
+    persistDocument(currentHtml);
+    syncHistoryState();
+  }, [persistDocument, syncHistoryState]);
+
+  const applyHistoryState = useCallback((nextHtml) => {
     if (!cvRef.current) {
       return;
     }
 
-    writeStoredCvData(cvRef.current.innerHTML);
-  }, []);
+    isApplyingHistoryRef.current = true;
+    cvRef.current.innerHTML = nextHtml;
+    lastDocumentHtmlRef.current = nextHtml;
+    persistDocument(nextHtml);
+    window.setTimeout(() => {
+      isApplyingHistoryRef.current = false;
+    }, 0);
+    syncHistoryState();
+  }, [persistDocument, syncHistoryState]);
+
+  const handleUndo = useCallback(() => {
+    if (!undoStackRef.current.length) {
+      return;
+    }
+
+    const currentHtml = lastDocumentHtmlRef.current;
+    const previousHtml = undoStackRef.current.pop();
+
+    if (currentHtml) {
+      redoStackRef.current.push(currentHtml);
+    }
+
+    if (previousHtml) {
+      applyHistoryState(previousHtml);
+    }
+  }, [applyHistoryState]);
+
+  const handleRedo = useCallback(() => {
+    if (!redoStackRef.current.length) {
+      return;
+    }
+
+    const currentHtml = lastDocumentHtmlRef.current;
+    const redoHtml = redoStackRef.current.pop();
+
+    if (currentHtml) {
+      undoStackRef.current.push(currentHtml);
+    }
+
+    if (redoHtml) {
+      applyHistoryState(redoHtml);
+    }
+  }, [applyHistoryState]);
+
+  const handleKeyDown = useCallback((event) => {
+    const modifierPressed = event.metaKey || event.ctrlKey;
+
+    if (!modifierPressed || event.key.toLowerCase() !== 'z') {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (event.shiftKey) {
+      handleRedo();
+      return;
+    }
+
+    handleUndo();
+  }, [handleRedo, handleUndo]);
 
   useEffect(() => {
     if (!cvRef.current) {
@@ -123,6 +226,8 @@ function App() {
       );
 
       cvRef.current.innerHTML = migratedDocumentHtml;
+      lastDocumentHtmlRef.current = migratedDocumentHtml;
+      syncHistoryState();
 
       if (
         storedCvData.templateVersion !== CURRENT_TEMPLATE_VERSION ||
@@ -134,8 +239,10 @@ function App() {
       return;
     }
 
-    writeStoredCvData(cvRef.current.innerHTML);
-  }, []);
+    lastDocumentHtmlRef.current = cvRef.current.innerHTML;
+    persistDocument(cvRef.current.innerHTML);
+    syncHistoryState();
+  }, [persistDocument, syncHistoryState]);
 
   return (
     <main className="page">
@@ -145,6 +252,15 @@ function App() {
       </header>
 
       <section className="cv-shell">
+        <div className="history-controls" aria-label="History controls">
+          <button type="button" className="history-button" onClick={handleUndo} disabled={!historyState.canUndo}>
+            Undo
+          </button>
+          <button type="button" className="history-button" onClick={handleRedo} disabled={!historyState.canRedo}>
+            Redo
+          </button>
+        </div>
+
         <button
           type="button"
           className="save-pdf-button"
@@ -164,6 +280,7 @@ function App() {
           aria-label="Editable CV template"
           onPaste={handlePaste}
           onInput={handleInput}
+          onKeyDown={handleKeyDown}
         >
           <header className="profile-container hero" data-testid="profile-container">
             <h2 className="hero-name">
