@@ -25,6 +25,12 @@ body {
   gap: 1rem;
 }
 
+.is-printing .toolbar,
+.is-printing .save-pdf-button,
+.is-printing .history-controls {
+  display: none !important;
+}
+
 .toolbar {
   text-align: center;
 }

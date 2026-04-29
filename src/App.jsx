@@ -95,10 +95,12 @@ function App() {
   const redoStackRef = useRef([]);
   const lastDocumentHtmlRef = useRef('');
   const isApplyingHistoryRef = useRef(false);
+  const printCleanupTimeoutRef = useRef(null);
   const [historyState, setHistoryState] = useState({
     canUndo: false,
     canRedo: false,
   });
+  const [isPrinting, setIsPrinting] = useState(false);
 
   const syncHistoryState = useCallback(() => {
     setHistoryState({
@@ -112,7 +114,38 @@ function App() {
   }, []);
 
   const handleSaveAsPdf = useCallback(() => {
+    setIsPrinting(true);
     window.print();
+
+    if (printCleanupTimeoutRef.current) {
+      clearTimeout(printCleanupTimeoutRef.current);
+    }
+
+    printCleanupTimeoutRef.current = window.setTimeout(() => {
+      setIsPrinting(false);
+    }, 1000);
+  }, []);
+
+  useEffect(() => {
+    const handleBeforePrint = () => {
+      setIsPrinting(true);
+    };
+
+    const handleAfterPrint = () => {
+      setIsPrinting(false);
+    };
+
+    window.addEventListener('beforeprint', handleBeforePrint);
+    window.addEventListener('afterprint', handleAfterPrint);
+
+    return () => {
+      window.removeEventListener('beforeprint', handleBeforePrint);
+      window.removeEventListener('afterprint', handleAfterPrint);
+
+      if (printCleanupTimeoutRef.current) {
+        clearTimeout(printCleanupTimeoutRef.current);
+      }
+    };
   }, []);
 
   const handlePaste = useCallback((event) => {
@@ -245,7 +278,7 @@ function App() {
   }, [persistDocument, syncHistoryState]);
 
   return (
-    <main className="page">
+    <main className={`page${isPrinting ? ' is-printing' : ''}`}>
       <header className="toolbar" aria-label="CV editor controls">
         <h1>CV Editor</h1>
         <p>Click any text in the template to edit it.</p>
