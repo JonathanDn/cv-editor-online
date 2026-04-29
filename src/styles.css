@@ -307,7 +307,8 @@ body {
     display: none;
   }
 
-  .save-pdf-button {
+  .save-pdf-button,
+  .history-controls {
     display: none;
   }
 
