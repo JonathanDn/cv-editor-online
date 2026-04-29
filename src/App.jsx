@@ -284,7 +284,7 @@ function App() {
         <p>Click any text in the template to edit it.</p>
       </header>
 
-      <section className="cv-shell">
+      <section className="cv-layout">
         {!isPrinting && (
           <div className="history-controls" aria-label="History controls">
             <button type="button" className="history-button" onClick={handleUndo} disabled={!historyState.canUndo}>
@@ -296,27 +296,28 @@ function App() {
           </div>
         )}
 
-        <button
-          type="button"
-          className="save-pdf-button"
-          onClick={handleSaveAsPdf}
-          aria-label="Save as PDF"
-          title="Save as PDF"
-        >
-          <MdOutlineSaveAs className="save-pdf-icon" aria-hidden="true" focusable="false" />
-        </button>
+        <section className="cv-shell">
+          <button
+            type="button"
+            className="save-pdf-button"
+            onClick={handleSaveAsPdf}
+            aria-label="Save as PDF"
+            title="Save as PDF"
+          >
+            <MdOutlineSaveAs className="save-pdf-icon" aria-hidden="true" focusable="false" />
+          </button>
 
-        <article
-          ref={cvRef}
-          className="cv-document"
-          contentEditable
-          suppressContentEditableWarning
-          spellCheck={false}
-          aria-label="Editable CV template"
-          onPaste={handlePaste}
-          onInput={handleInput}
-          onKeyDown={handleKeyDown}
-        >
+          <article
+            ref={cvRef}
+            className="cv-document"
+            contentEditable
+            suppressContentEditableWarning
+            spellCheck={false}
+            aria-label="Editable CV template"
+            onPaste={handlePaste}
+            onInput={handleInput}
+            onKeyDown={handleKeyDown}
+          >
           <header className="profile-container hero" data-testid="profile-container">
             <h2 className="hero-name">
               <span className="hero-first">JANE</span>
@@ -443,7 +444,8 @@ function App() {
             <h3>Additional Information</h3>
             <p>Add extra achievements, projects, certifications, or volunteer work here.</p>
           </section>
-        </article>
+          </article>
+        </section>
       </section>
     </main>
   );
