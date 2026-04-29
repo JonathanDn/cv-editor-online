@@ -2,12 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { MdOutlineSaveAs } from 'react-icons/md';
 
 const LOCAL_STORAGE_KEY = 'cvEditorData';
-const CURRENT_TEMPLATE_VERSION = 4;
+const CURRENT_TEMPLATE_VERSION = 5;
 const EXPERIENCE_JOB_SELECTOR = '.experience-container .panel .job';
 const ADDITIONAL_SECTION_SELECTOR = '.additional-section';
 const MAX_UNDO_STATES = 50;
 
-const fifthExperienceMarkup = `
+const sixthExperienceMarkup = `
   <div class="job">
     <h4>Your Job Title Goes Here</h4>
     <p class="job-meta">Company Name | Jan 2012 - Dec 2013</p>
@@ -51,7 +51,22 @@ function readStoredCvData() {
 }
 
 function writeStoredCvData(documentHtml) {
+  const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
+  let existingData = {};
+
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        existingData = parsed;
+      }
+    } catch {
+      existingData = {};
+    }
+  }
+
   const payload = {
+    ...existingData,
     documentHtml,
     templateVersion: CURRENT_TEMPLATE_VERSION,
     updatedAt: new Date().toISOString(),
@@ -77,8 +92,8 @@ function migrateDocumentHtml(documentHtml, templateVersion) {
 
   const existingJobs = experiencePanel.querySelectorAll(EXPERIENCE_JOB_SELECTOR);
 
-  if (existingJobs.length < 5) {
-    experiencePanel.insertAdjacentHTML('beforeend', fifthExperienceMarkup);
+  if (existingJobs.length < 6) {
+    experiencePanel.insertAdjacentHTML('beforeend', sixthExperienceMarkup);
   }
 
   if (!hasAdditionalSection) {
@@ -434,6 +449,15 @@ function App() {
                   <p>Highlight earlier relevant experience to show the breadth of your background.</p>
                   <ul>
                     <li>Call out achievements that demonstrate transferable skills.</li>
+                  </ul>
+                </div>
+
+                <div className="job">
+                  <h4>Your Job Title Goes Here</h4>
+                  <p className="job-meta">Company Name | Jan 2010 - Dec 2011</p>
+                  <p>Include foundational experience that still supports your current career direction.</p>
+                  <ul>
+                    <li>Focus on relevant outcomes and transferable strengths.</li>
                   </ul>
                 </div>
               </section>

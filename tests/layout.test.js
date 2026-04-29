@@ -16,9 +16,9 @@ test('names containers for profile, contact, and experience sections', () => {
   assert.match(appSource, /data-testid="additional-section"/);
 });
 
-test('includes five experience entries in the template', () => {
+test('includes six experience entries in the template', () => {
   const jobEntries = appSource.match(/<div className="job">/g) ?? [];
-  assert.equal(jobEntries.length, 5);
+  assert.equal(jobEntries.length, 6);
 });
 
 test('keeps contact and experience side-by-side on default layout width', () => {
@@ -57,4 +57,9 @@ test('preserves two-column layout in print/PDF output', () => {
     stylesSource,
     /@media print\s*\{[\s\S]*?\.left-column\s*\{[\s\S]*?border-right:\s*1px solid var\(--divider\);/
   );
+});
+
+
+test('preserves existing localStorage fields when saving', () => {
+  assert.match(appSource, /\.\.\.existingData/);
 });
