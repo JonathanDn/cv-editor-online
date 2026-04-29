@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { MdOutlineSaveAs } from 'react-icons/md';
 
 const LOCAL_STORAGE_KEY = 'cvEditorData';
-const CURRENT_TEMPLATE_VERSION = 5;
+const CURRENT_TEMPLATE_VERSION = 6;
 const EXPERIENCE_JOB_SELECTOR = '.experience-container .panel .job';
 const ADDITIONAL_SECTION_SELECTOR = '.additional-section';
+const LANGUAGES_SECTION_SELECTOR = '.languages-section';
 const MAX_UNDO_STATES = 50;
 
 const sixthExperienceMarkup = `
@@ -22,6 +23,13 @@ const additionalSectionMarkup = `
   <section class="panel additional-section" data-testid="additional-section">
     <h3>Additional Information</h3>
     <p>Add extra achievements, projects, certifications, or volunteer work here.</p>
+  </section>
+`;
+
+const languagesSectionMarkup = `
+  <section class="panel languages-section" data-testid="languages-section">
+    <h3>Languages</h3>
+    <p>Hebrew (Mother tongue), English (Fluent), Arabic (Mostly reading)</p>
   </section>
 `;
 
@@ -85,6 +93,7 @@ function migrateDocumentHtml(documentHtml, templateVersion) {
 
   const experiencePanel = wrapper.querySelector('.experience-container .panel');
   const hasAdditionalSection = wrapper.querySelector(ADDITIONAL_SECTION_SELECTOR);
+  const hasLanguagesSection = wrapper.querySelector(LANGUAGES_SECTION_SELECTOR);
 
   if (!experiencePanel) {
     return documentHtml;
@@ -99,6 +108,11 @@ function migrateDocumentHtml(documentHtml, templateVersion) {
   if (!hasAdditionalSection) {
     const contentGrid = wrapper.querySelector('.content-grid');
     contentGrid?.insertAdjacentHTML('afterend', additionalSectionMarkup);
+  }
+
+  if (!hasLanguagesSection) {
+    const awardsSection = wrapper.querySelector('.left-column .panel:nth-of-type(3)');
+    awardsSection?.insertAdjacentHTML('afterend', languagesSectionMarkup);
   }
 
   return wrapper.innerHTML;
@@ -386,6 +400,11 @@ function App() {
                   <p>Organisation</p>
                   <p>2014</p>
                 </div>
+              </section>
+
+              <section className="panel languages-section" data-testid="languages-section">
+                <h3>Languages</h3>
+                <p>Hebrew (Mother tongue), English (Fluent), Arabic (Mostly reading)</p>
               </section>
             </aside>
 
