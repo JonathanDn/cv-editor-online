@@ -284,39 +284,39 @@ function App() {
         <p>Click any text in the template to edit it.</p>
       </header>
 
+      {!isPrinting && (
+        <div className="history-controls" aria-label="History controls">
+          <button type="button" className="history-button" onClick={handleUndo} disabled={!historyState.canUndo}>
+            Undo
+          </button>
+          <button type="button" className="history-button" onClick={handleRedo} disabled={!historyState.canRedo}>
+            Redo
+          </button>
+        </div>
+      )}
+
       <section className="cv-shell">
-        {!isPrinting && (
-          <div className="history-controls" aria-label="History controls">
-            <button type="button" className="history-button" onClick={handleUndo} disabled={!historyState.canUndo}>
-              Undo
-            </button>
-            <button type="button" className="history-button" onClick={handleRedo} disabled={!historyState.canRedo}>
-              Redo
-            </button>
-          </div>
-        )}
+          <button
+            type="button"
+            className="save-pdf-button"
+            onClick={handleSaveAsPdf}
+            aria-label="Save as PDF"
+            title="Save as PDF"
+          >
+            <MdOutlineSaveAs className="save-pdf-icon" aria-hidden="true" focusable="false" />
+          </button>
 
-        <button
-          type="button"
-          className="save-pdf-button"
-          onClick={handleSaveAsPdf}
-          aria-label="Save as PDF"
-          title="Save as PDF"
-        >
-          <MdOutlineSaveAs className="save-pdf-icon" aria-hidden="true" focusable="false" />
-        </button>
-
-        <article
-          ref={cvRef}
-          className="cv-document"
-          contentEditable
-          suppressContentEditableWarning
-          spellCheck={false}
-          aria-label="Editable CV template"
-          onPaste={handlePaste}
-          onInput={handleInput}
-          onKeyDown={handleKeyDown}
-        >
+          <article
+            ref={cvRef}
+            className="cv-document"
+            contentEditable
+            suppressContentEditableWarning
+            spellCheck={false}
+            aria-label="Editable CV template"
+            onPaste={handlePaste}
+            onInput={handleInput}
+            onKeyDown={handleKeyDown}
+          >
           <header className="profile-container hero" data-testid="profile-container">
             <h2 className="hero-name">
               <span className="hero-first">JANE</span>
@@ -443,7 +443,7 @@ function App() {
             <h3>Additional Information</h3>
             <p>Add extra achievements, projects, certifications, or volunteer work here.</p>
           </section>
-        </article>
+          </article>
       </section>
     </main>
   );
