@@ -285,14 +285,16 @@ function App() {
       </header>
 
       <section className="cv-shell">
-        <div className="history-controls" aria-label="History controls">
-          <button type="button" className="history-button" onClick={handleUndo} disabled={!historyState.canUndo}>
-            Undo
-          </button>
-          <button type="button" className="history-button" onClick={handleRedo} disabled={!historyState.canRedo}>
-            Redo
-          </button>
-        </div>
+        {!isPrinting && (
+          <div className="history-controls" aria-label="History controls">
+            <button type="button" className="history-button" onClick={handleUndo} disabled={!historyState.canUndo}>
+              Undo
+            </button>
+            <button type="button" className="history-button" onClick={handleRedo} disabled={!historyState.canRedo}>
+              Redo
+            </button>
+          </div>
+        )}
 
         <button
           type="button"
