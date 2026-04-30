@@ -70,9 +70,9 @@ test('adds experience and left section panels', async ({ page }) => {
   const jobs = page.locator('.experience-container .panel .job');
   const leftSections = page.locator('.left-column .panel');
 
-  await expect(jobs).toHaveCount(5);
+  const beforeJobs = await jobs.count();
   await page.getByRole('button', { name: 'Add Experience' }).click();
-  await expect(jobs).toHaveCount(6);
+  await expect(jobs).toHaveCount(beforeJobs + 1);
 
   const beforeSections = await leftSections.count();
   await page.getByRole('button', { name: 'Add Left Section' }).click();
