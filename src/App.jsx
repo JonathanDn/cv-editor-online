@@ -33,6 +33,13 @@ const languagesSectionMarkup = `
   </section>
 `;
 
+const leftSectionMarkup = `
+  <section class="panel custom-left-section" data-testid="custom-left-section">
+    <h3>Section Title</h3>
+    <p>Add a short description for this left column section.</p>
+  </section>
+`;
+
 function readStoredCvData() {
   const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
 
@@ -257,6 +264,62 @@ function App() {
     }
   }, [applyHistoryState]);
 
+  const applyDocumentChange = useCallback((updater) => {
+    if (!cvRef.current || isApplyingHistoryRef.current) {
+      return;
+    }
+
+    const previousHtml = lastDocumentHtmlRef.current;
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = previousHtml;
+    const changed = updater(wrapper);
+
+    if (!changed) {
+      return;
+    }
+
+    const nextHtml = wrapper.innerHTML;
+
+    if (nextHtml === previousHtml) {
+      return;
+    }
+
+    undoStackRef.current.push(previousHtml);
+    if (undoStackRef.current.length > MAX_UNDO_STATES) {
+      undoStackRef.current.shift();
+    }
+
+    redoStackRef.current = [];
+    cvRef.current.innerHTML = nextHtml;
+    lastDocumentHtmlRef.current = nextHtml;
+    persistDocument(nextHtml);
+    syncHistoryState();
+  }, [persistDocument, syncHistoryState]);
+
+  const handleAddExperience = useCallback(() => {
+    applyDocumentChange((wrapper) => {
+      const experiencePanel = wrapper.querySelector('.experience-container .panel');
+      if (!experiencePanel) {
+        return false;
+      }
+
+      experiencePanel.insertAdjacentHTML('beforeend', sixthExperienceMarkup);
+      return true;
+    });
+  }, [applyDocumentChange]);
+
+  const handleAddLeftSection = useCallback(() => {
+    applyDocumentChange((wrapper) => {
+      const leftColumn = wrapper.querySelector('.left-column');
+      if (!leftColumn) {
+        return false;
+      }
+
+      leftColumn.insertAdjacentHTML('beforeend', leftSectionMarkup);
+      return true;
+    });
+  }, [applyDocumentChange]);
+
   const handleKeyDown = useCallback((event) => {
     const modifierPressed = event.metaKey || event.ctrlKey;
 
@@ -321,6 +384,12 @@ function App() {
             </button>
             <button type="button" className="history-button" onClick={handleRedo} disabled={!historyState.canRedo}>
               Redo
+            </button>
+            <button type="button" className="history-button" onClick={handleAddExperience}>
+              Add Experience
+            </button>
+            <button type="button" className="history-button" onClick={handleAddLeftSection}>
+              Add Left Section
             </button>
           </div>
         )}
