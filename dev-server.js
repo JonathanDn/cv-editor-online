@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = resolve('.');
+const root = resolve(process.env.STATIC_ROOT || '.');
 const port = Number(process.env.PORT || 5173);
 
 const mimeTypes = {
