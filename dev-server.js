@@ -25,6 +25,7 @@ const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 const MAX_TAG_LENGTH = 60;
 const MAX_FOLDER_LENGTH = 80;
+const EXPORT_VERSION = '1.0';
 
 const cvs = [];
 let nextId = 1;
@@ -80,8 +81,40 @@ const toDto = (cv) => ({
   revision: cv.updatedAt,
   lastOpenedAt: cv.lastOpenedAt,
   folderId: cv.folderId,
-  tags: cv.tags
+  tags: cv.tags,
+  sourceMetadata: cv.sourceMetadata || null
 });
+
+const buildCvExportPayload = (cv) => ({
+  export_version: EXPORT_VERSION,
+  exported_at: new Date().toISOString(),
+  cv: {
+    title: cv.title,
+    targetRole: cv.targetRole,
+    targetCompany: cv.targetCompany,
+    content_json: cv.contentJson,
+    content_text: cv.contentText,
+    folder_id: cv.folderId,
+    tags: cv.tags
+  }
+});
+
+const validateImportedCv = (payload) => {
+  if (!isPlainObject(payload)) return { error: 'Import payload must be a JSON object.' };
+  if (payload.export_version !== EXPORT_VERSION) return { error: `Unsupported export_version. Expected ${EXPORT_VERSION}.` };
+  if (!isPlainObject(payload.cv)) return { error: 'Import payload must include a cv object.' };
+  const cvPayload = {
+    ...payload.cv,
+    targetRole: payload.cv.targetRole ?? undefined,
+    targetCompany: payload.cv.targetCompany ?? undefined
+  };
+  const err = validatePayload(cvPayload, { requireTitle: true });
+  if (err) return { error: `Invalid cv data: ${err}` };
+  if (payload.cv.tags !== undefined && (!Array.isArray(payload.cv.tags) || payload.cv.tags.some((tag) => typeof tag !== 'string' || !tag.trim()))) {
+    return { error: 'Invalid cv data: tags must be a non-empty string array when provided.' };
+  }
+  return { cv: payload.cv };
+};
 
 const isPlainObject = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
 
@@ -377,6 +410,53 @@ export const requestHandler = async (req, res) => {
         cvs.push(duplicated);
         duplicateGuards.set(guardKey, { cvId: duplicated.id, createdAtMs: nowMs });
         return sendJson(res, 201, { data: toDto(duplicated) });
+      }
+
+      const exportJsonMatch = pathname.match(/^\/api\/cvs\/([^/]+)\/export\/json$/);
+      if (exportJsonMatch && method === 'GET') {
+        const cv = cvs.find((row) => row.id === exportJsonMatch[1] && row.userId === userId && !row.deletedAt);
+        if (!cv) return sendJson(res, 404, { error: 'Not found' });
+        return sendJson(res, 200, { data: buildCvExportPayload(cv) });
+      }
+
+      const importJsonMatch = pathname === '/api/cvs/import/json';
+      if (importJsonMatch && method === 'POST') {
+        const payload = await readJsonBody(req);
+        const parsed = validateImportedCv(payload);
+        if (parsed.error) {
+          return sendJson(res, 400, {
+            error: 'Import failed',
+            message: parsed.error,
+            guidance: 'Re-export your CV and import the unmodified JSON payload.'
+          });
+        }
+        const now = new Date().toISOString();
+        const imported = {
+          id: String(nextId++),
+          userId,
+          title: parsed.cv.title.trim(),
+          targetRole: parsed.cv.targetRole || null,
+          targetCompany: parsed.cv.targetCompany || null,
+          contentJson: parsed.cv.content_json ?? {},
+          contentText: parsed.cv.content_text ?? null,
+          status: 'active',
+          createdAt: now,
+          updatedAt: now,
+          lastOpenedAt: now,
+          deletedAt: null,
+          archivedAt: null,
+          saveCount: 0,
+          folderId: parsed.cv.folder_id ?? 'inbox',
+          tags: Array.isArray(parsed.cv.tags) ? parsed.cv.tags : [],
+          sourceMetadata: {
+            source: 'json_import',
+            importedAt: now,
+            exportVersion: payload.export_version,
+            exportedAt: payload.exported_at || null
+          }
+        };
+        cvs.push(imported);
+        return sendJson(res, 201, { data: toDto(imported) });
       }
 
       const bulkMatch = pathname.match(/^\/api\/cvs\/bulk\/(archive|delete|restore)$/);

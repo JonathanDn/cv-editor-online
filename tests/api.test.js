@@ -195,3 +195,29 @@ test('Tags/folders: assign, unassign, move, and filter', async () => {
 
   server.close();
 });
+
+test('Import/export JSON: exports payload and imports as tagged copy', async () => {
+  const server = createAppServer();
+  server.listen(0);
+  await once(server, 'listening');
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+
+  const created = await jsonReq(base, '/api/cvs', { method: 'POST', body: { title: 'Original CV', content_json: { summary: 'hello' } } });
+  const id = created.body.data.id;
+  const exported = await jsonReq(base, `/api/cvs/${id}/export/json`);
+  assert.equal(exported.status, 200);
+  assert.equal(exported.body.data.export_version, '1.0');
+  assert.equal(exported.body.data.cv.title, 'Original CV');
+
+  const imported = await jsonReq(base, '/api/cvs/import/json', { method: 'POST', body: exported.body.data });
+  assert.equal(imported.status, 201);
+  assert.notEqual(imported.body.data.id, id);
+  assert.equal(imported.body.data.sourceMetadata.source, 'json_import');
+
+  const badImport = await jsonReq(base, '/api/cvs/import/json', { method: 'POST', body: { nope: true } });
+  assert.equal(badImport.status, 400);
+  assert.equal(badImport.body.error, 'Import failed');
+
+  server.close();
+});
