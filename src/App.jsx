@@ -7,6 +7,8 @@ const TABS = [
   { key: 'deleted', label: 'Deleted' },
 ];
 
+const AUTOSAVE_DELAY_MS = 7000;
+
 const formatUpdatedAt = (value) => {
   if (!value) return '—';
   const date = new Date(value);
@@ -19,6 +21,24 @@ const roleCompanyLabel = (cv) => {
   if (cv.targetRole) return cv.targetRole;
   if (cv.targetCompany) return cv.targetCompany;
   return '—';
+};
+
+const parseCvId = () => {
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get('id');
+  return raw?.trim() || null;
+};
+
+const parseContentJsonToHtml = (value) => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.join('');
+  if (typeof value === 'object') {
+    if (typeof value.html === 'string') return value.html;
+    if (typeof value.content === 'string') return value.content;
+    return JSON.stringify(value, null, 2);
+  }
+  return String(value);
 };
 
 function CvListPage() {
@@ -64,16 +84,105 @@ function CvListPage() {
 
 function App() {
   const [route, setRoute] = useState('editor');
+  const [cvId] = useState(parseCvId);
+  const [saveState, setSaveState] = useState('Saved');
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [editorError, setEditorError] = useState('');
   const cvRef = useRef(null);
+  const initialHtmlRef = useRef('');
+  const isHydratingRef = useRef(false);
+
+  const loadCv = useCallback(async () => {
+    if (!cvId || !cvRef.current) return;
+    setEditorError('');
+    setSaveState('Saving…');
+    try {
+      const res = await fetch(`/api/cvs/${cvId}`, { headers: { 'x-user-id': 'u1' } });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.error || 'Could not load CV.');
+      const html = parseContentJsonToHtml(payload?.data?.content_json);
+      isHydratingRef.current = true;
+      cvRef.current.innerHTML = html || '<h2>CV Editor</h2><p>Edit your CV content here.</p>';
+      initialHtmlRef.current = cvRef.current.innerHTML;
+      setHasUnsavedChanges(false);
+      setSaveState('Saved');
+    } catch (err) {
+      setEditorError(err instanceof Error ? err.message : 'Could not load CV.');
+      setSaveState('Saved');
+    } finally {
+      isHydratingRef.current = false;
+    }
+  }, [cvId]);
+
+  useEffect(() => { loadCv(); }, [loadCv]);
+
+  const saveCv = useCallback(async () => {
+    if (!cvId || !cvRef.current) return;
+    const html = cvRef.current.innerHTML;
+    setSaveState('Saving…');
+    setEditorError('');
+    try {
+      const res = await fetch(`/api/cvs/${cvId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': 'u1' },
+        body: JSON.stringify({ content_json: { html }, content_text: cvRef.current.innerText })
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.error || 'Could not save CV.');
+      initialHtmlRef.current = html;
+      setHasUnsavedChanges(false);
+      setSaveState('Saved');
+    } catch (err) {
+      setEditorError(err instanceof Error ? err.message : 'Could not save CV.');
+      setSaveState('Saved');
+    }
+  }, [cvId]);
+
+  useEffect(() => {
+    if (!cvRef.current) return undefined;
+    const onInput = () => {
+      if (isHydratingRef.current) return;
+      setHasUnsavedChanges(true);
+      setSaveState('Saved');
+    };
+    const node = cvRef.current;
+    node.addEventListener('input', onInput);
+    return () => node.removeEventListener('input', onInput);
+  }, []);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return undefined;
+    const handle = window.setTimeout(() => { saveCv(); }, AUTOSAVE_DELAY_MS);
+    return () => window.clearTimeout(handle);
+  }, [hasUnsavedChanges, saveCv]);
+
+  useEffect(() => {
+    const onBeforeUnload = (event) => {
+      if (!hasUnsavedChanges) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  const handleNavigate = useCallback((nextRoute) => {
+    if (hasUnsavedChanges) {
+      const shouldLeave = window.confirm('You have unsaved changes. Leave this page?');
+      if (!shouldLeave) return;
+    }
+    setRoute(nextRoute);
+  }, [hasUnsavedChanges]);
+
   const handleSaveAsPdf = useCallback(() => { if (!cvRef.current) return; window.print(); }, []);
 
   return (
     <main className="page">
       <header className="app-nav">
-        <button type="button" className={route === 'editor' ? 'active' : ''} onClick={() => setRoute('editor')}>Editor</button>
-        <button type="button" className={route === 'my-cvs' ? 'active' : ''} onClick={() => setRoute('my-cvs')}>My CVs</button>
+        <button type="button" className={route === 'editor' ? 'active' : ''} onClick={() => handleNavigate('editor')}>Editor</button>
+        <button type="button" className={route === 'my-cvs' ? 'active' : ''} onClick={() => handleNavigate('my-cvs')}>My CVs</button>
       </header>
-      {route === 'my-cvs' ? <CvListPage /> : <section className="cv-shell"><button type="button" className="save-pdf-button" onClick={handleSaveAsPdf} aria-label="Save as PDF" title="Save as PDF"><MdOutlineSaveAs className="save-pdf-icon" /></button><article ref={cvRef} className="cv-document" contentEditable suppressContentEditableWarning><h2>CV Editor</h2><p>Edit your CV content here.</p></article></section>}
+      {route === 'my-cvs' ? <CvListPage /> : <section className="cv-shell"><button type="button" className="save-pdf-button" onClick={handleSaveAsPdf} aria-label="Save as PDF" title="Save as PDF"><MdOutlineSaveAs className="save-pdf-icon" /></button><div className="editor-toolbar"><button type="button" className="secondary-btn" onClick={saveCv} disabled={!cvId}>Save</button><small>{saveState}</small></div>{editorError && <p className="error-text">{editorError}</p>}<article ref={cvRef} className="cv-document" contentEditable suppressContentEditableWarning><h2>CV Editor</h2><p>Edit your CV content here.</p></article></section>}
     </main>
   );
 }
