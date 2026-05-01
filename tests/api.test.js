@@ -222,6 +222,53 @@ test('Import/export JSON: exports payload and imports as tagged copy', async () 
   server.close();
 });
 
+test('CV detail and render-ready endpoint: stable sections and version selection', async () => {
+  const server = createAppServer();
+  server.listen(0);
+  await once(server, 'listening');
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+
+  const created = await jsonReq(base, '/api/cvs', {
+    method: 'POST',
+    body: { title: 'Structured CV', content_json: { summary: 'Senior engineer', experience: [{ text: 'Built APIs' }] } }
+  });
+  assert.equal(created.status, 201);
+  const id = created.body.data.id;
+  const revision = created.body.data.updatedAt;
+
+  assert.ok(Array.isArray(created.body.data.content_json.skills));
+  assert.ok(Array.isArray(created.body.data.content_json.education));
+  assert.equal(created.body.data.content_json.summary, 'Senior engineer');
+
+  const saved = await jsonReq(base, `/api/cvs/${id}`, {
+    method: 'PUT',
+    body: { content_json: { summary: 'Principal engineer', skills: ['Node.js'] }, updated_at: revision, save_reason: 'manual_save' }
+  });
+  assert.equal(saved.status, 200);
+
+  const snapshots = await jsonReq(base, `/api/cvs/${id}/snapshots`);
+  assert.equal(snapshots.status, 200);
+  assert.ok(snapshots.body.data.length > 0);
+  const snapshotId = snapshots.body.data[0].id;
+
+  const renderCurrent = await jsonReq(base, `/api/cvs/${id}/render-ready-text?version=current`);
+  assert.equal(renderCurrent.status, 200);
+  assert.equal(renderCurrent.body.data.cv_id, id);
+  assert.ok(renderCurrent.body.data.section_order.includes('summary'));
+  assert.ok(renderCurrent.body.data.section_order.includes('experience'));
+  assert.ok(typeof renderCurrent.body.data.render_ready_text === 'string');
+
+  const renderSnapshot = await jsonReq(base, `/api/cvs/${id}/render-ready-text?version=${snapshotId}`);
+  assert.equal(renderSnapshot.status, 200);
+  assert.equal(renderSnapshot.body.data.version_id, snapshotId);
+
+  const notFoundVersion = await jsonReq(base, `/api/cvs/${id}/render-ready-text?version=missing-snapshot`);
+  assert.equal(notFoundVersion.status, 404);
+
+  server.close();
+});
+
 test('Analytics: tracks lifecycle events, save failures, dashboard panels, and alert thresholds', async () => {
   const server = createAppServer();
   server.listen(0);
