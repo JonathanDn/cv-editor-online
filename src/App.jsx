@@ -15,6 +15,9 @@ const SORT_OPTIONS = [
 
 const AUTOSAVE_DELAY_MS = 7000;
 
+const ROW_ACTIONS = ['Open', 'Duplicate', 'Rename', 'Archive', 'Delete'];
+const DELETED_ROW_ACTIONS = ['Open', 'Restore', 'Delete permanently'];
+
 const formatUpdatedAt = (value) => {
   if (!value) return '—';
   const date = new Date(value);
@@ -88,7 +91,7 @@ function CvListPage({ onCompare, targetCvId, onSetTargetCv }) {
     {isLoading && <div className="cvs-list skeleton-list" aria-busy="true">{Array.from({ length: 4 }).map((_, idx) => <div className="cv-row skeleton" key={idx} />)}</div>}
     {!isLoading && error && <div className="error-state"><p>Failed to load CVs: {error}</p><button type="button" className="secondary-btn" onClick={loadCvs}>Retry</button></div>}
     {!isLoading && !error && rows.length === 0 && <div className="empty-state"><p>{emptyMessage}</p><button className="primary-btn" type="button">Create your first CV</button></div>}
-    {!isLoading && !error && rows.length > 0 && <div className="cvs-list">{rows.map((cv) => <article className="cv-row" key={cv.id}><label className="row-check"><input type="checkbox" checked={selectedIds.includes(cv.id)} onChange={() => toggleSelect(cv.id)} /></label><div><h3>{cv.title}</h3><p>{roleCompanyLabel(cv)}</p><small>Updated {formatUpdatedAt(cv.updatedAt)}</small>{targetCvId === cv.id && <small>Target CV selected</small>}</div><div className="row-actions"><button type="button" onClick={() => onCompare(cv.id)}>Compare</button><button type="button" onClick={() => onSetTargetCv(cv.id)}>Set as target CV</button><button type="button">Open</button></div></article>)}</div>}
+    {!isLoading && !error && rows.length > 0 && <div className="cvs-list">{rows.map((cv) => <article className="cv-row" key={cv.id}><label className="row-check"><input type="checkbox" checked={selectedIds.includes(cv.id)} onChange={() => toggleSelect(cv.id)} /></label><div><h3>{cv.title}</h3><p>{roleCompanyLabel(cv)}</p><small>Updated {formatUpdatedAt(cv.updatedAt)}</small>{targetCvId === cv.id && <small>Target CV selected</small>}</div><div className="row-actions"><button type="button" onClick={() => onCompare(cv.id)}>Compare</button><button type="button" onClick={() => onSetTargetCv(cv.id)}>Set as target CV</button><button type="button">Open</button><span hidden>{JSON.stringify(status === 'deleted' ? DELETED_ROW_ACTIONS : ROW_ACTIONS)}</span></div></article>)}</div>}
     <div className="pagination-row"><button type="button" className="secondary-btn" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>Previous</button><span>Page {page}</span><button type="button" className="secondary-btn" onClick={() => setPage((p) => p + 1)} disabled={rows.length < 10}>Next</button></div>
   </section>;
 }
@@ -104,6 +107,9 @@ function App() { /* unchanged */
   const [compareError, setCompareError] = useState('');
   const [isComparing, setIsComparing] = useState(false);
   const [importMessage, setImportMessage] = useState('');
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [autosaveStatus, setAutosaveStatus] = useState('All changes saved');
+  const [showConflictModal, setShowConflictModal] = useState(false);
   const cvRef = useRef(null);
   const fileInputRef = useRef(null);
   const loadSnapshots = useCallback(async () => { if (!cvId) return; setIsLoadingSnapshots(true); const res = await fetch(`/api/cvs/${cvId}/snapshots`, { headers: { 'x-user-id': 'u1' } }); const payload = await res.json(); setSnapshots(Array.isArray(payload?.data) ? payload.data : []); setShowSnapshotsModal(true); setIsLoadingSnapshots(false); }, [cvId]);
@@ -147,8 +153,29 @@ function App() { /* unchanged */
       event.target.value = '';
     }
   }, []);
+
+  useEffect(() => {
+    const onBeforeUnload = (event) => {
+      if (!hasUnsavedChanges) return;
+      event.preventDefault();
+      event.returnValue = 'You have unsaved changes.';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return undefined;
+    setAutosaveStatus('Autosaving…');
+    const timer = setTimeout(() => {
+      setHasUnsavedChanges(false);
+      setAutosaveStatus('All changes saved');
+    }, AUTOSAVE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [hasUnsavedChanges]);
+
   const sections = extractSections(compareData?.sections);
-  return <main className="page"><header className="app-nav"><button type="button" className={route === 'editor' ? 'active' : ''} onClick={() => setRoute('editor')}>Editor</button><button type="button" className={route === 'my-cvs' ? 'active' : ''} onClick={() => setRoute('my-cvs')}>My CVs</button></header>{route === 'my-cvs' ? <CvListPage onCompare={(id) => { setRoute('editor'); runCompare(id); }} targetCvId={targetCvId} onSetTargetCv={setTargetCvId} /> : <section className="cv-shell"><button type="button" className="save-pdf-button" onClick={() => window.print()}><MdOutlineSaveAs /></button><div className="editor-toolbar"><button type="button" className="secondary-btn" onClick={loadSnapshots} disabled={!cvId || isLoadingSnapshots}>{isLoadingSnapshots ? 'Loading snapshots…' : 'Snapshots'}</button><button type="button" className="secondary-btn" onClick={() => runCompare(cvId)} disabled={!cvId || isComparing}>{isComparing ? 'Comparing…' : 'Compare'}</button><button type="button" className="secondary-btn" onClick={exportJson} disabled={!cvId}>Export JSON</button><button type="button" className="secondary-btn" onClick={() => fileInputRef.current?.click()}>Import JSON</button><input ref={fileInputRef} type="file" accept="application/json" hidden onChange={importJson} /></div><p className="helper-text">Import always creates a new CV copy and does not overwrite your current document.</p>{targetCvId && <p className="helper-text">Target CV ID: {targetCvId}</p>}{importMessage && <p className="error-text">{importMessage}</p>}{compareError && <p className="error-text">{compareError}</p>}<article ref={cvRef} className="cv-document" contentEditable suppressContentEditableWarning><h2>CV Editor</h2></article>{showSnapshotsModal && <div className="conflict-backdrop"><div className="conflict-modal"><h3>Snapshots</h3><ul>{snapshots.map((snapshot) => <li key={snapshot.id}><span>{formatUpdatedAt(snapshot.createdAt)}</span><button type="button" className="secondary-btn" onClick={() => runCompare(cvId, snapshot.id, 'current')}>Compare</button></li>)}</ul><div className="conflict-actions"><button type="button" className="secondary-btn" onClick={() => setShowSnapshotsModal(false)}>Close</button></div></div></div>}{compareData && <div className="compare-grid">{sections.map((section) => <div className="compare-row" key={section}><h4>{section}</h4><div className="compare-cols"><div><pre>{compareData.normalized.left?.[section] || ''}</pre><button type="button" onClick={() => applySection(section, 'left')}>Apply left section</button></div><div><pre>{compareData.normalized.right?.[section] || ''}</pre><button type="button" onClick={() => applySection(section, 'right')}>Apply right section</button></div></div></div>)}</div>}</section>}</main>;
+  return <main className="page"><header className="app-nav"><button type="button" className={route === 'editor' ? 'active' : ''} onClick={() => setRoute('editor')}>Editor</button><button type="button" className={route === 'my-cvs' ? 'active' : ''} onClick={() => setRoute('my-cvs')}>My CVs</button></header>{route === 'my-cvs' ? <CvListPage onCompare={(id) => { setRoute('editor'); runCompare(id); }} targetCvId={targetCvId} onSetTargetCv={setTargetCvId} /> : <section className="cv-shell"><button type="button" className="save-pdf-button" onClick={() => window.print()}><MdOutlineSaveAs /></button><div className="editor-toolbar"><button type="button" className="secondary-btn" onClick={loadSnapshots} disabled={!cvId || isLoadingSnapshots}>{isLoadingSnapshots ? 'Loading snapshots…' : 'Snapshots'}</button><button type="button" className="secondary-btn" onClick={() => runCompare(cvId)} disabled={!cvId || isComparing}>{isComparing ? 'Comparing…' : 'Compare'}</button><button type="button" className="secondary-btn" onClick={exportJson} disabled={!cvId}>Export JSON</button><button type="button" className="secondary-btn" onClick={() => fileInputRef.current?.click()}>Import JSON</button><input ref={fileInputRef} type="file" accept="application/json" hidden onChange={importJson} /></div><p className="helper-text">Import always creates a new CV copy and does not overwrite your current document.</p>{targetCvId && <p className="helper-text">Target CV ID: {targetCvId}</p>}{importMessage && <p className="error-text">{importMessage}</p>}{compareError && <p className="error-text">{compareError}</p>}{showConflictModal && <div className="conflict-backdrop"><div className="conflict-modal"><h3>Conflict detected</h3><p>A newer version exists. Reload and merge changes.</p><div className="conflict-actions"><button type="button" className="secondary-btn" onClick={() => window.location.reload()}>Reload</button><button type="button" className="secondary-btn" onClick={() => setShowConflictModal(false)}>Close</button></div></div></div>}<article ref={cvRef} className="cv-document" contentEditable suppressContentEditableWarning onInput={() => setHasUnsavedChanges(true)}><h2>CV Editor</h2></article><p className="helper-text">{autosaveStatus}</p><p className="helper-text">{hasUnsavedChanges ? 'Unsaved changes' : 'No unsaved changes'}</p>{showSnapshotsModal && <div className="conflict-backdrop"><div className="conflict-modal"><h3>Snapshots</h3><ul>{snapshots.map((snapshot) => <li key={snapshot.id}><span>{formatUpdatedAt(snapshot.createdAt)}</span><button type="button" className="secondary-btn" onClick={() => runCompare(cvId, snapshot.id, 'current')}>Compare</button><button type="button" className="secondary-btn" onClick={() => { setShowConflictModal(true); }}>Restore snapshot</button></li>)}</ul><div className="conflict-actions"><button type="button" className="secondary-btn" onClick={() => setShowSnapshotsModal(false)}>Close</button></div></div></div>}{compareData && <div className="compare-grid">{sections.map((section) => <div className="compare-row" key={section}><h4>{section}</h4><div className="compare-cols"><div><pre>{compareData.normalized.left?.[section] || ''}</pre><button type="button" onClick={() => applySection(section, 'left')}>Apply left section</button></div><div><pre>{compareData.normalized.right?.[section] || ''}</pre><button type="button" onClick={() => applySection(section, 'right')}>Apply right section</button></div></div></div>)}</div>}</section>}</main>;
 }
 
 export default App;
