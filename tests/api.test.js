@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { createAppServer } from '../dev-server.js';
+import { __getSnapshotsForTesting, createAppServer } from '../dev-server.js';
 
 const jsonReq = async (base, path, { method = 'GET', userId = 'u1', body } = {}) => {
   const res = await fetch(`${base}${path}`, {
@@ -127,6 +127,38 @@ test('CV duplicate endpoint supports overrides and idempotency guard', async () 
     body: {}
   });
   assert.equal(unauthorized.status, 404);
+
+  server.close();
+});
+
+test('Snapshots are written on manual saves and autosave checkpoints with retention', async () => {
+  const server = createAppServer();
+  server.listen(0);
+  await once(server, 'listening');
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+
+  const created = await jsonReq(base, '/api/cvs', { method: 'POST', body: { title: 'Snapshot CV', content_json: { v: 1 } } });
+  const cvId = created.body.data.id;
+
+  let revision = created.body.data.updatedAt;
+  for (let i = 1; i <= 26; i += 1) {
+    const reason = i % 2 === 0 ? 'manual_save' : 'autosave';
+    const saved = await jsonReq(base, `/api/cvs/${cvId}`, {
+      method: 'PUT',
+      body: { content_json: { v: i }, updated_at: revision, save_reason: reason }
+    });
+    assert.equal(saved.status, 200);
+    revision = saved.body.data.updatedAt;
+  }
+
+  const ownedSnapshots = __getSnapshotsForTesting('u1', cvId);
+  assert.equal(ownedSnapshots.length, 16);
+  assert.ok(ownedSnapshots.some((row) => row.reason === 'manual_save'));
+  assert.ok(ownedSnapshots.some((row) => row.reason === 'autosave_checkpoint'));
+
+  const otherUserSnapshots = __getSnapshotsForTesting('u2', cvId);
+  assert.equal(otherUserSnapshots.length, 0);
 
   server.close();
 });

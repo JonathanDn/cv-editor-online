@@ -27,6 +27,10 @@ const MAX_LIMIT = 100;
 const cvs = [];
 let nextId = 1;
 const duplicateGuards = new Map();
+const snapshots = [];
+let nextSnapshotId = 1;
+const AUTOSAVE_SNAPSHOT_INTERVAL = 5;
+const SNAPSHOT_RETENTION_LIMIT = 20;
 
 const sendJson = (res, status, body) => {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -119,6 +123,10 @@ const validatePayload = (payload, { requireTitle = false } = {}) => {
     return 'revision must be a string';
   }
 
+  if (payload.save_reason !== undefined && payload.save_reason !== 'manual_save' && payload.save_reason !== 'autosave') {
+    return 'save_reason must be manual_save or autosave';
+  }
+
   return null;
 };
 
@@ -129,6 +137,39 @@ const parsePagination = (url) => {
   const page = pageParam ? Math.max(1, Number(pageParam) || 1) : 1;
   const status = (url.searchParams.get('status') || 'active').toLowerCase();
   return { limit, cursor, page, status };
+};
+
+const writeSnapshot = ({ cv, reason }) => {
+  try {
+    snapshots.push({
+      id: String(nextSnapshotId++),
+      cvId: cv.id,
+      userId: cv.userId,
+      contentJson: cv.contentJson,
+      createdAt: new Date().toISOString(),
+      reason
+    });
+
+    const cvSnapshots = snapshots
+      .filter((row) => row.cvId === cv.id)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+    if (cvSnapshots.length > SNAPSHOT_RETENTION_LIMIT) {
+      const keepIds = new Set(cvSnapshots.slice(0, SNAPSHOT_RETENTION_LIMIT).map((row) => row.id));
+      for (let i = snapshots.length - 1; i >= 0; i -= 1) {
+        if (snapshots[i].cvId === cv.id && !keepIds.has(snapshots[i].id)) {
+          snapshots.splice(i, 1);
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('Snapshot write failed', {
+      cvId: cv.id,
+      userId: cv.userId,
+      reason,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
 };
 
 export const requestHandler = async (req, res) => {
@@ -162,7 +203,8 @@ export const requestHandler = async (req, res) => {
           updatedAt: now,
           lastOpenedAt: now,
           deletedAt: null,
-          archivedAt: null
+          archivedAt: null,
+          saveCount: 0
         };
         cvs.push(cv);
         return sendJson(res, 201, { data: toDto(cv) });
@@ -224,7 +266,16 @@ export const requestHandler = async (req, res) => {
         if (payload.targetCompany !== undefined) cv.targetCompany = payload.targetCompany;
         if (payload.content_json !== undefined) cv.contentJson = payload.content_json;
         if (payload.content_text !== undefined) cv.contentText = payload.content_text;
+        cv.saveCount = (cv.saveCount || 0) + 1;
         cv.updatedAt = new Date().toISOString();
+
+        const saveReason = payload.save_reason === 'manual_save' ? 'manual_save' : 'autosave';
+        if (saveReason === 'manual_save') {
+          writeSnapshot({ cv, reason: 'manual_save' });
+        } else if (cv.saveCount % AUTOSAVE_SNAPSHOT_INTERVAL === 0) {
+          writeSnapshot({ cv, reason: 'autosave_checkpoint' });
+        }
+
         return sendJson(res, 200, { data: toDto(cv) });
       }
 
@@ -262,7 +313,8 @@ export const requestHandler = async (req, res) => {
           updatedAt: now,
           lastOpenedAt: now,
           deletedAt: null,
-          archivedAt: null
+          archivedAt: null,
+          saveCount: 0
         };
         cvs.push(duplicated);
         duplicateGuards.set(guardKey, { cvId: duplicated.id, createdAtMs: nowMs });
@@ -312,6 +364,7 @@ export const requestHandler = async (req, res) => {
 };
 
 export const createAppServer = () => createServer(requestHandler);
+export const __getSnapshotsForTesting = (userId, cvId) => snapshots.filter((row) => row.userId === userId && row.cvId === cvId);
 
 const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 
