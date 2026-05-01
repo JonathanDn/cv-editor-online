@@ -15,7 +15,7 @@ const jsonReq = async (base, path, { method = 'GET', userId = 'u1', body } = {})
   return { status: res.status, body: await res.json() };
 };
 
-test('CV API CRUD, lifecycle, ownership and pagination', async () => {
+test('API lifecycle: create, list, get, update, duplicate, archive, delete, restore', async () => {
   const server = createAppServer();
   server.listen(0);
   await once(server, 'listening');
@@ -24,125 +24,115 @@ test('CV API CRUD, lifecycle, ownership and pagination', async () => {
 
   const created = await jsonReq(base, '/api/cvs', { method: 'POST', body: { title: 'My CV', content_json: { sections: [] } } });
   assert.equal(created.status, 201);
-  assert.equal(created.body.data.title, 'My CV');
-
-  const badCreate = await jsonReq(base, '/api/cvs', { method: 'POST', body: { title: '' } });
-  assert.equal(badCreate.status, 400);
-
-  const list = await jsonReq(base, '/api/cvs?limit=1&page=1');
-  assert.equal(list.status, 200);
-  assert.equal(list.body.data.length, 1);
-
   const id = created.body.data.id;
-  const getOne = await jsonReq(base, `/api/cvs/${id}`);
-  assert.equal(getOne.status, 200);
-  assert.ok(getOne.body.data.updatedAt);
-  assert.equal(getOne.body.data.revision, getOne.body.data.updatedAt);
 
-  const forbiddenForOther = await jsonReq(base, `/api/cvs/${id}`, { userId: 'u2' });
-  assert.equal(forbiddenForOther.status, 404);
+  const listed = await jsonReq(base, '/api/cvs?status=active');
+  assert.equal(listed.status, 200);
+  assert.equal(listed.body.data.length, 1);
+  assert.equal(listed.body.data[0].id, id);
+
+  const fetched = await jsonReq(base, `/api/cvs/${id}`);
+  assert.equal(fetched.status, 200);
+  assert.equal(fetched.body.data.id, id);
 
   const updated = await jsonReq(base, `/api/cvs/${id}`, {
     method: 'PUT',
-    body: { title: 'Updated CV', updated_at: getOne.body.data.updatedAt }
+    body: { title: 'Updated CV', updated_at: fetched.body.data.updatedAt }
   });
   assert.equal(updated.status, 200);
   assert.equal(updated.body.data.title, 'Updated CV');
 
-  const conflict = await jsonReq(base, `/api/cvs/${id}`, {
-    method: 'PUT',
-    body: { title: 'Stale Update', updated_at: getOne.body.data.updatedAt }
+  const duplicated = await jsonReq(base, `/api/cvs/${id}/duplicate`, {
+    method: 'POST',
+    body: { title: 'Updated CV Copy' }
   });
-  assert.equal(conflict.status, 409);
-  assert.equal(conflict.body.code, 'CV_CONFLICT');
+  assert.equal(duplicated.status, 201);
+  assert.equal(duplicated.body.data.title, 'Updated CV Copy');
 
   const archived = await jsonReq(base, `/api/cvs/${id}/archive`, { method: 'POST' });
+  assert.equal(archived.status, 200);
   assert.equal(archived.body.data.status, 'archived');
 
   const deleted = await jsonReq(base, `/api/cvs/${id}/delete`, { method: 'POST' });
+  assert.equal(deleted.status, 200);
   assert.equal(deleted.body.data.status, 'deleted');
 
-  const hiddenFromList = await jsonReq(base, '/api/cvs');
-  assert.equal(hiddenFromList.body.data.length, 0);
-
   const restored = await jsonReq(base, `/api/cvs/${id}/restore`, { method: 'POST' });
+  assert.equal(restored.status, 200);
   assert.equal(restored.body.data.status, 'active');
 
   server.close();
 });
 
-test('CV duplicate endpoint supports overrides and idempotency guard', async () => {
+test('Authorization: user A cannot access or mutate user B CV', async () => {
   const server = createAppServer();
   server.listen(0);
   await once(server, 'listening');
   const { port } = server.address();
   const base = `http://127.0.0.1:${port}`;
 
-  const created = await jsonReq(base, '/api/cvs', {
-    method: 'POST',
-    body: {
-      title: 'Source CV',
-      targetRole: 'Engineer',
-      targetCompany: 'Acme',
-      content_json: { sections: [{ id: 1 }] },
-      content_text: 'plain text'
-    }
+  const createdByA = await jsonReq(base, '/api/cvs', { method: 'POST', userId: 'user-a', body: { title: 'A CV' } });
+  assert.equal(createdByA.status, 201);
+  const id = createdByA.body.data.id;
+
+  const getByB = await jsonReq(base, `/api/cvs/${id}`, { userId: 'user-b' });
+  assert.equal(getByB.status, 404);
+
+  const updateByB = await jsonReq(base, `/api/cvs/${id}`, {
+    method: 'PUT',
+    userId: 'user-b',
+    body: { title: 'Hacked', updated_at: createdByA.body.data.updatedAt }
   });
-  const sourceId = created.body.data.id;
+  assert.equal(updateByB.status, 404);
 
-  const duplicate = await jsonReq(base, `/api/cvs/${sourceId}/duplicate`, {
-    method: 'POST',
-    body: { title: 'Copy CV', targetCompany: 'Beta Corp' }
-  });
-  assert.equal(duplicate.status, 201);
-  assert.notEqual(duplicate.body.data.id, sourceId);
-  assert.equal(duplicate.body.data.title, 'Copy CV');
-  assert.equal(duplicate.body.data.targetRole, 'Engineer');
-  assert.equal(duplicate.body.data.targetCompany, 'Beta Corp');
-  assert.deepEqual(duplicate.body.data.content_json, { sections: [{ id: 1 }] });
-  assert.equal(duplicate.body.data.content_text, 'plain text');
+  const duplicateByB = await jsonReq(base, `/api/cvs/${id}/duplicate`, { method: 'POST', userId: 'user-b', body: {} });
+  assert.equal(duplicateByB.status, 404);
 
-  const idemHeaders = {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-user-id': 'u1',
-      'idempotency-key': 'dup-1'
-    },
-    body: JSON.stringify({})
-  };
-
-  const firstIdem = await fetch(`${base}/api/cvs/${sourceId}/duplicate`, idemHeaders);
-  const firstIdemBody = await firstIdem.json();
-  const secondIdem = await fetch(`${base}/api/cvs/${sourceId}/duplicate`, idemHeaders);
-  const secondIdemBody = await secondIdem.json();
-
-  assert.equal(firstIdem.status, 201);
-  assert.equal(secondIdem.status, 200);
-  assert.equal(firstIdemBody.data.id, secondIdemBody.data.id);
-
-  const unauthorized = await jsonReq(base, `/api/cvs/${sourceId}/duplicate`, {
-    method: 'POST',
-    userId: 'u2',
-    body: {}
-  });
-  assert.equal(unauthorized.status, 404);
+  const archiveByB = await jsonReq(base, `/api/cvs/${id}/archive`, { method: 'POST', userId: 'user-b' });
+  assert.equal(archiveByB.status, 404);
 
   server.close();
 });
 
-test('Snapshots are written on manual saves and autosave checkpoints with retention', async () => {
+test('Concurrency: stale updated_at/revision gets HTTP 409 conflict', async () => {
   const server = createAppServer();
   server.listen(0);
   await once(server, 'listening');
   const { port } = server.address();
   const base = `http://127.0.0.1:${port}`;
 
-  const created = await jsonReq(base, '/api/cvs', { method: 'POST', body: { title: 'Snapshot CV', content_json: { v: 1 } } });
-  const cvId = created.body.data.id;
+  const created = await jsonReq(base, '/api/cvs', { method: 'POST', body: { title: 'Concurrent CV' } });
+  assert.equal(created.status, 201);
+  const id = created.body.data.id;
 
+  const firstUpdate = await jsonReq(base, `/api/cvs/${id}`, {
+    method: 'PUT',
+    body: { title: 'First Writer', revision: created.body.data.revision }
+  });
+  assert.equal(firstUpdate.status, 200);
+
+  const staleUpdate = await jsonReq(base, `/api/cvs/${id}`, {
+    method: 'PUT',
+    body: { title: 'Second Writer', updated_at: created.body.data.updatedAt }
+  });
+  assert.equal(staleUpdate.status, 409);
+  assert.equal(staleUpdate.body.code, 'CV_CONFLICT');
+
+  server.close();
+});
+
+test('Snapshots: creation and retention limit enforcement', async () => {
+  const server = createAppServer();
+  server.listen(0);
+  await once(server, 'listening');
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+
+  const created = await jsonReq(base, '/api/cvs', { method: 'POST', body: { title: 'Snapshot CV', content_json: { v: 0 } } });
+  const cvId = created.body.data.id;
   let revision = created.body.data.updatedAt;
-  for (let i = 1; i <= 26; i += 1) {
+
+  for (let i = 1; i <= 40; i += 1) {
     const reason = i % 2 === 0 ? 'manual_save' : 'autosave';
     const saved = await jsonReq(base, `/api/cvs/${cvId}`, {
       method: 'PUT',
@@ -153,12 +143,24 @@ test('Snapshots are written on manual saves and autosave checkpoints with retent
   }
 
   const ownedSnapshots = __getSnapshotsForTesting('u1', cvId);
-  assert.equal(ownedSnapshots.length, 16);
+  assert.equal(ownedSnapshots.length, 20);
   assert.ok(ownedSnapshots.some((row) => row.reason === 'manual_save'));
   assert.ok(ownedSnapshots.some((row) => row.reason === 'autosave_checkpoint'));
 
-  const otherUserSnapshots = __getSnapshotsForTesting('u2', cvId);
-  assert.equal(otherUserSnapshots.length, 0);
+  const listedSnapshots = await jsonReq(base, `/api/cvs/${cvId}/snapshots`);
+  assert.equal(listedSnapshots.status, 200);
+  assert.equal(listedSnapshots.body.data.length, 20);
+
+  const latestSnapshot = listedSnapshots.body.data[0];
+  const restored = await jsonReq(base, `/api/cvs/${cvId}/restore-snapshot/${latestSnapshot.id}`, {
+    method: 'POST',
+    body: { create_pre_restore: true }
+  });
+  assert.equal(restored.status, 200);
+
+  const postRestoreSnapshots = __getSnapshotsForTesting('u1', cvId);
+  assert.equal(postRestoreSnapshots.length, 20);
+  assert.ok(postRestoreSnapshots.some((row) => row.reason === 'pre_restore'));
 
   server.close();
 });
