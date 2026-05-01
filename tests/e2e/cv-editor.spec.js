@@ -121,3 +121,20 @@ test('editor autosave updates status indicator', async ({ page }) => {
   await page.waitForTimeout(7600);
   await expect(status).toContainText('Saved');
 });
+
+
+test('conflict modal uses stable test ids', async ({ page }) => {
+  await page.goto('/?id=1');
+  await page.getByRole('button', { name: 'Snapshots' }).click();
+  await page.getByRole('button', { name: 'Restore snapshot' }).first().click();
+
+  const conflictModal = page.getByTestId('conflict-reload-modal');
+  await expect(conflictModal).toBeVisible();
+  await expect(conflictModal.getByRole('heading', { name: 'Version conflict detected' })).toBeVisible();
+  await expect(conflictModal).toContainText('A newer version is available. Reload to review and merge changes.');
+  await expect(page.getByTestId('conflict-reload-action')).toBeVisible();
+  await expect(page.getByTestId('conflict-close-action')).toBeVisible();
+
+  await page.getByTestId('conflict-close-action').click();
+  await expect(conflictModal).toHaveCount(0);
+});
