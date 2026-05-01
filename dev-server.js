@@ -118,7 +118,8 @@ const parsePagination = (url) => {
   const cursor = url.searchParams.get('cursor');
   const pageParam = url.searchParams.get('page');
   const page = pageParam ? Math.max(1, Number(pageParam) || 1) : 1;
-  return { limit, cursor, page };
+  const status = (url.searchParams.get('status') || 'active').toLowerCase();
+  return { limit, cursor, page, status };
 };
 
 export const requestHandler = async (req, res) => {
@@ -159,9 +160,11 @@ export const requestHandler = async (req, res) => {
       }
 
       if (method === 'GET' && pathname === '/api/cvs') {
-        const { limit, cursor, page } = parsePagination(url);
+        const { limit, cursor, page, status } = parsePagination(url);
+        const allowedStatuses = new Set(['active', 'archived', 'deleted']);
+        const requestedStatus = allowedStatuses.has(status) ? status : 'active';
         const owned = cvs
-          .filter((cv) => cv.userId === userId && !cv.deletedAt)
+          .filter((cv) => cv.userId === userId && cv.status === requestedStatus)
           .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
         let startIndex = 0;
         if (cursor) {
