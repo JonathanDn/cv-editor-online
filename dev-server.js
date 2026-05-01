@@ -148,7 +148,15 @@ const parsePagination = (url) => {
   const status = (url.searchParams.get('status') || 'active').toLowerCase();
   const folderId = url.searchParams.get('folder_id');
   const tag = url.searchParams.get('tag');
-  return { limit, cursor, page, status, folderId, tag };
+  const sort = (url.searchParams.get('sort') || 'recent').toLowerCase();
+  return { limit, cursor, page, status, folderId, tag, sort };
+};
+
+
+const sortCvs = (rows, sort) => {
+  if (sort === 'title') return [...rows].sort((a, b) => a.title.localeCompare(b.title));
+  if (sort === 'company') return [...rows].sort((a, b) => (a.targetCompany || '').localeCompare(b.targetCompany || ''));
+  return [...rows].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 };
 
 const writeSnapshot = ({ cv, reason }) => {
@@ -256,25 +264,25 @@ export const requestHandler = async (req, res) => {
       }
 
       if (method === 'GET' && pathname === '/api/cvs') {
-        const { limit, cursor, page, status, folderId, tag } = parsePagination(url);
+        const { limit, cursor, page, status, folderId, tag, sort } = parsePagination(url);
         const allowedStatuses = new Set(['active', 'archived', 'deleted']);
         const requestedStatus = allowedStatuses.has(status) ? status : 'active';
         const owned = cvs
           .filter((cv) => cv.userId === userId && cv.status === requestedStatus)
           .filter((cv) => (!folderId ? true : cv.folderId === folderId))
-          .filter((cv) => (!tag ? true : cv.tags.includes(tag)))
-          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+          .filter((cv) => (!tag ? true : cv.tags.includes(tag)));
+        const sortedOwned = sortCvs(owned, sort);
         let startIndex = 0;
         if (cursor) {
-          const idx = owned.findIndex((cv) => cv.id === cursor);
+          const idx = sortedOwned.findIndex((cv) => cv.id === cursor);
           startIndex = idx >= 0 ? idx + 1 : 0;
         } else if (page > 1) {
           startIndex = (page - 1) * limit;
         }
 
-        const data = owned.slice(startIndex, startIndex + limit).map(toDto);
+        const data = sortedOwned.slice(startIndex, startIndex + limit).map(toDto);
         const nextCursor = data.length === limit ? data[data.length - 1].id : null;
-        return sendJson(res, 200, { data, pagination: { limit, nextCursor, page } });
+        return sendJson(res, 200, { data, pagination: { limit, nextCursor, page, sort } });
       }
 
       const idMatch = pathname.match(/^\/api\/cvs\/([^/]+)$/);
@@ -369,6 +377,25 @@ export const requestHandler = async (req, res) => {
         cvs.push(duplicated);
         duplicateGuards.set(guardKey, { cvId: duplicated.id, createdAtMs: nowMs });
         return sendJson(res, 201, { data: toDto(duplicated) });
+      }
+
+      const bulkMatch = pathname.match(/^\/api\/cvs\/bulk\/(archive|delete|restore)$/);
+      if (bulkMatch && method === 'POST') {
+        const action = bulkMatch[1];
+        const payload = await readJsonBody(req);
+        const ids = Array.isArray(payload?.ids) ? payload.ids.map((id) => String(id)) : [];
+        if (!ids.length) return sendJson(res, 400, { error: 'ids is required' });
+        const uniqueIds = Array.from(new Set(ids));
+        const targets = uniqueIds.map((id) => cvs.find((row) => row.id === id && row.userId === userId));
+        if (targets.some((row) => !row)) return sendJson(res, 404, { error: 'One or more CVs not found' });
+        const now = new Date().toISOString();
+        for (const cv of targets) {
+          if (action === 'archive') { cv.status = 'archived'; cv.archivedAt = now; }
+          else if (action === 'delete') { cv.status = 'deleted'; cv.deletedAt = now; }
+          else { cv.status = 'active'; cv.deletedAt = null; cv.archivedAt = null; }
+          cv.updatedAt = now;
+        }
+        return sendJson(res, 200, { data: targets.map(toDto), count: targets.length });
       }
 
       const actionMatch = pathname.match(/^\/api\/cvs\/([^/]+)\/(archive|delete|restore)$/);
