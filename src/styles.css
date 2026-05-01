@@ -30,3 +30,6 @@
 .compare-row{background:#fff;border:1px solid var(--border);border-radius:12px;padding:.75rem}
 .compare-cols{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}
 .compare-cols pre{white-space:pre-wrap;background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:.5rem;min-height:90px}
+.bulk-row{display:flex;align-items:center;gap:.5rem;margin:.5rem 0 1rem;flex-wrap:wrap}
+.row-check{display:flex;align-items:center}
+.pagination-row{display:flex;align-items:center;justify-content:flex-end;gap:.6rem;margin-top:.8rem}

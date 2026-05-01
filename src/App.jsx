@@ -7,6 +7,12 @@ const TABS = [
   { key: 'deleted', label: 'Deleted' },
 ];
 
+const SORT_OPTIONS = [
+  { key: 'recent', label: 'Most recent' },
+  { key: 'title', label: 'Title' },
+  { key: 'company', label: 'Company' },
+];
+
 const AUTOSAVE_DELAY_MS = 7000;
 
 const formatUpdatedAt = (value) => {
@@ -15,81 +21,79 @@ const formatUpdatedAt = (value) => {
   if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleString();
 };
-
-const roleCompanyLabel = (cv) => {
-  if (cv.targetRole && cv.targetCompany) return `${cv.targetRole} / ${cv.targetCompany}`;
-  if (cv.targetRole) return cv.targetRole;
-  if (cv.targetCompany) return cv.targetCompany;
-  return '—';
-};
-
-const parseCvId = () => {
-  const params = new URLSearchParams(window.location.search);
-  const raw = params.get('id');
-  return raw?.trim() || null;
-};
-
-const parseContentJsonToHtml = (value) => {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) return value.join('');
-  if (typeof value === 'object') {
-    if (typeof value.html === 'string') return value.html;
-    if (typeof value.content === 'string') return value.content;
-    return JSON.stringify(value, null, 2);
-  }
-  return String(value);
-};
-
+const roleCompanyLabel = (cv) => cv.targetRole && cv.targetCompany ? `${cv.targetRole} / ${cv.targetCompany}` : (cv.targetRole || cv.targetCompany || '—');
+const parseCvId = () => { const params = new URLSearchParams(window.location.search); return params.get('id')?.trim() || null; };
+const parseContentJsonToHtml = (value) => { if (value === null || value === undefined) return ''; if (typeof value === 'string') return value; if (Array.isArray(value)) return value.join(''); if (typeof value === 'object') { if (typeof value.html === 'string') return value.html; if (typeof value.content === 'string') return value.content; return JSON.stringify(value, null, 2); } return String(value); };
 const extractSections = (normalized = {}) => Object.keys(normalized).sort();
 
 function CvListPage({ onCompare }) {
   const [status, setStatus] = useState('active');
+  const [sort, setSort] = useState('recent');
+  const [page, setPage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [rows, setRows] = useState([]);
+  const [selectedIds, setSelectedIds] = useState([]);
   const [tagFilter, setTagFilter] = useState('');
   const [folderFilter, setFolderFilter] = useState('');
 
   const loadCvs = useCallback(async () => {
-    setIsLoading(true);
-    setError('');
+    setIsLoading(true); setError('');
     try {
-      const params = new URLSearchParams({ status });
+      const params = new URLSearchParams({ status, sort, page: String(page), limit: '10' });
       if (tagFilter) params.set('tag', tagFilter);
       if (folderFilter) params.set('folder_id', folderFilter);
       const res = await fetch(`/api/cvs?${params.toString()}`, { headers: { 'x-user-id': 'u1' } });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload?.error || 'Could not load CVs.');
       setRows(Array.isArray(payload?.data) ? payload.data : []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load CVs.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [status, tagFilter, folderFilter]);
+      setSelectedIds([]);
+    } catch (err) { setError(err instanceof Error ? err.message : 'Could not load CVs.'); }
+    finally { setIsLoading(false); }
+  }, [status, sort, page, tagFilter, folderFilter]);
 
+  useEffect(() => { setPage(1); }, [status, sort, tagFilter, folderFilter]);
   useEffect(() => { loadCvs(); }, [loadCvs]);
 
   const emptyMessage = useMemo(() => `No ${status} CVs yet.`, [status]);
+  const allVisibleSelected = rows.length > 0 && rows.every((cv) => selectedIds.includes(cv.id));
 
-  return (
-    <section className="cvs-page">
-      <div className="cvs-header"><h1>My CVs</h1><button className="primary-btn" type="button">Create your first CV</button></div>
-      <div className="status-chips">{TABS.map((tab) => <button key={tab.key} className={`chip${status === tab.key ? ' active' : ''}`} type="button" onClick={() => setStatus(tab.key)}>{tab.label}</button>)}</div>
-      <div className="status-chips">
-        <input placeholder="Filter by tag" value={tagFilter} onChange={(e) => setTagFilter(e.target.value.trim().toLowerCase())} />
-        <input placeholder="Filter by folder" value={folderFilter} onChange={(e) => setFolderFilter(e.target.value.trim())} />
-      </div>
-      {isLoading && <div className="cvs-list skeleton-list" aria-busy="true">{Array.from({ length: 4 }).map((_, idx) => <div className="cv-row skeleton" key={idx} />)}</div>}
-      {!isLoading && error && <div className="error-state"><p>Failed to load CVs: {error}</p><button type="button" className="secondary-btn" onClick={loadCvs}>Retry</button></div>}
-      {!isLoading && !error && rows.length === 0 && <div className="empty-state"><p>{emptyMessage}</p><button className="primary-btn" type="button">Create your first CV</button></div>}
-      {!isLoading && !error && rows.length > 0 && <div className="cvs-list">{rows.map((cv) => <article className="cv-row" key={cv.id}><div><h3>{cv.title}</h3><p>{roleCompanyLabel(cv)}</p><small>Updated {formatUpdatedAt(cv.updatedAt)}</small></div><div className="row-actions"><button type="button" onClick={() => onCompare(cv.id)}>Compare</button><button type="button">Open</button></div></article>)}</div>}
-    </section>
-  );
+  const toggleSelect = (id) => setSelectedIds((prev) => prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id]);
+
+  const runBulkAction = async (action) => {
+    if (!selectedIds.length) return;
+    if (!window.confirm(`${action[0].toUpperCase()}${action.slice(1)} ${selectedIds.length} CV(s)?`)) return;
+    const res = await fetch(`/api/cvs/bulk/${action}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-user-id': 'u1' },
+      body: JSON.stringify({ ids: selectedIds })
+    });
+    const payload = await res.json();
+    if (!res.ok) {
+      setError(payload?.error || `Could not ${action}.`);
+      return;
+    }
+    loadCvs();
+  };
+
+  return <section className="cvs-page">
+    <div className="cvs-header"><h1>My CVs</h1><button className="primary-btn" type="button">Create your first CV</button></div>
+    <div className="status-chips">{TABS.map((tab) => <button key={tab.key} className={`chip${status === tab.key ? ' active' : ''}`} type="button" onClick={() => setStatus(tab.key)}>{tab.label}</button>)}</div>
+    <div className="status-chips">
+      <input placeholder="Filter by tag" value={tagFilter} onChange={(e) => setTagFilter(e.target.value.trim().toLowerCase())} />
+      <input placeholder="Filter by folder" value={folderFilter} onChange={(e) => setFolderFilter(e.target.value.trim())} />
+      <select value={sort} onChange={(e) => setSort(e.target.value)}>{SORT_OPTIONS.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}</select>
+    </div>
+    <div className="bulk-row"><label><input type="checkbox" checked={allVisibleSelected} onChange={() => setSelectedIds(allVisibleSelected ? [] : rows.map((cv) => cv.id))} /> Select page</label><button type="button" className="secondary-btn" onClick={() => runBulkAction('archive')} disabled={!selectedIds.length}>Archive</button><button type="button" className="secondary-btn" onClick={() => runBulkAction('delete')} disabled={!selectedIds.length}>Delete</button><button type="button" className="secondary-btn" onClick={() => runBulkAction('restore')} disabled={!selectedIds.length}>Restore</button></div>
+    {isLoading && <div className="cvs-list skeleton-list" aria-busy="true">{Array.from({ length: 4 }).map((_, idx) => <div className="cv-row skeleton" key={idx} />)}</div>}
+    {!isLoading && error && <div className="error-state"><p>Failed to load CVs: {error}</p><button type="button" className="secondary-btn" onClick={loadCvs}>Retry</button></div>}
+    {!isLoading && !error && rows.length === 0 && <div className="empty-state"><p>{emptyMessage}</p><button className="primary-btn" type="button">Create your first CV</button></div>}
+    {!isLoading && !error && rows.length > 0 && <div className="cvs-list">{rows.map((cv) => <article className="cv-row" key={cv.id}><label className="row-check"><input type="checkbox" checked={selectedIds.includes(cv.id)} onChange={() => toggleSelect(cv.id)} /></label><div><h3>{cv.title}</h3><p>{roleCompanyLabel(cv)}</p><small>Updated {formatUpdatedAt(cv.updatedAt)}</small></div><div className="row-actions"><button type="button" onClick={() => onCompare(cv.id)}>Compare</button><button type="button">Open</button></div></article>)}</div>}
+    <div className="pagination-row"><button type="button" className="secondary-btn" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>Previous</button><span>Page {page}</span><button type="button" className="secondary-btn" onClick={() => setPage((p) => p + 1)} disabled={rows.length < 10}>Next</button></div>
+  </section>;
 }
 
-function App() {
+function App() { /* unchanged */
   const [route, setRoute] = useState('editor');
   const [cvId] = useState(parseCvId);
   const [showSnapshotsModal, setShowSnapshotsModal] = useState(false);
@@ -99,47 +103,12 @@ function App() {
   const [compareError, setCompareError] = useState('');
   const [isComparing, setIsComparing] = useState(false);
   const cvRef = useRef(null);
-
-  const loadSnapshots = useCallback(async () => {
-    if (!cvId) return;
-    setIsLoadingSnapshots(true);
-    const res = await fetch(`/api/cvs/${cvId}/snapshots`, { headers: { 'x-user-id': 'u1' } });
-    const payload = await res.json();
-    setSnapshots(Array.isArray(payload?.data) ? payload.data : []);
-    setShowSnapshotsModal(true);
-    setIsLoadingSnapshots(false);
-  }, [cvId]);
-
-  const runCompare = useCallback(async (baseCvId, leftSnapshotId = 'current', rightSnapshotId = 'current') => {
-    setCompareError('');
-    setIsComparing(true);
-    try {
-      const params = new URLSearchParams({ left: leftSnapshotId, right: rightSnapshotId });
-      const res = await fetch(`/api/cvs/${baseCvId}/compare?${params.toString()}`, { headers: { 'x-user-id': 'u1' } });
-      const payload = await res.json();
-      if (!res.ok) throw new Error(payload?.error || 'Could not compare versions.');
-      setCompareData(payload?.data || null);
-    } catch (err) {
-      setCompareError(err instanceof Error ? err.message : 'Could not compare versions.');
-    } finally {
-      setIsComparing(false);
-    }
-  }, []);
-
-  const applySection = useCallback((sectionName, side) => {
-    if (!cvRef.current || !compareData?.normalized?.[side]?.[sectionName]) return;
-    cvRef.current.innerHTML += `\n<section><h3>${sectionName}</h3><p>${compareData.normalized[side][sectionName]}</p></section>`;
-  }, [compareData]);
-
+  const loadSnapshots = useCallback(async () => { if (!cvId) return; setIsLoadingSnapshots(true); const res = await fetch(`/api/cvs/${cvId}/snapshots`, { headers: { 'x-user-id': 'u1' } }); const payload = await res.json(); setSnapshots(Array.isArray(payload?.data) ? payload.data : []); setShowSnapshotsModal(true); setIsLoadingSnapshots(false); }, [cvId]);
+  const runCompare = useCallback(async (baseCvId, leftSnapshotId = 'current', rightSnapshotId = 'current') => { setCompareError(''); setIsComparing(true); try { const params = new URLSearchParams({ left: leftSnapshotId, right: rightSnapshotId }); const res = await fetch(`/api/cvs/${baseCvId}/compare?${params.toString()}`, { headers: { 'x-user-id': 'u1' } }); const payload = await res.json(); if (!res.ok) throw new Error(payload?.error || 'Could not compare versions.'); setCompareData(payload?.data || null);} catch (err) { setCompareError(err instanceof Error ? err.message : 'Could not compare versions.'); } finally { setIsComparing(false); } }, []);
+  const applySection = useCallback((sectionName, side) => { if (!cvRef.current || !compareData?.normalized?.[side]?.[sectionName]) return; cvRef.current.innerHTML += `
+<section><h3>${sectionName}</h3><p>${compareData.normalized[side][sectionName]}</p></section>`; }, [compareData]);
   const sections = extractSections(compareData?.sections);
-
-  return <main className="page">
-    <header className="app-nav"><button type="button" className={route === 'editor' ? 'active' : ''} onClick={() => setRoute('editor')}>Editor</button><button type="button" className={route === 'my-cvs' ? 'active' : ''} onClick={() => setRoute('my-cvs')}>My CVs</button></header>
-    {route === 'my-cvs' ? <CvListPage onCompare={(id) => { setRoute('editor'); runCompare(id); }} /> : <section className="cv-shell"><button type="button" className="save-pdf-button" onClick={() => window.print()}><MdOutlineSaveAs /></button><div className="editor-toolbar"><button type="button" className="secondary-btn" onClick={loadSnapshots} disabled={!cvId || isLoadingSnapshots}>{isLoadingSnapshots ? 'Loading snapshots…' : 'Snapshots'}</button><button type="button" className="secondary-btn" onClick={() => runCompare(cvId)} disabled={!cvId || isComparing}>{isComparing ? 'Comparing…' : 'Compare'}</button></div>{compareError && <p className="error-text">{compareError}</p>}<article ref={cvRef} className="cv-document" contentEditable suppressContentEditableWarning><h2>CV Editor</h2></article>
-      {showSnapshotsModal && <div className="conflict-backdrop"><div className="conflict-modal"><h3>Snapshots</h3><ul>{snapshots.map((snapshot) => <li key={snapshot.id}><span>{formatUpdatedAt(snapshot.createdAt)}</span><button type="button" className="secondary-btn" onClick={() => runCompare(cvId, snapshot.id, 'current')}>Compare</button></li>)}</ul><div className="conflict-actions"><button type="button" className="secondary-btn" onClick={() => setShowSnapshotsModal(false)}>Close</button></div></div></div>}
-      {compareData && <div className="compare-grid">{sections.map((section) => <div className="compare-row" key={section}><h4>{section}</h4><div className="compare-cols"><div><pre>{compareData.normalized.left?.[section] || ''}</pre><button type="button" onClick={() => applySection(section, 'left')}>Apply left section</button></div><div><pre>{compareData.normalized.right?.[section] || ''}</pre><button type="button" onClick={() => applySection(section, 'right')}>Apply right section</button></div></div></div>)}</div>}
-    </section>}
-  </main>;
+  return <main className="page"><header className="app-nav"><button type="button" className={route === 'editor' ? 'active' : ''} onClick={() => setRoute('editor')}>Editor</button><button type="button" className={route === 'my-cvs' ? 'active' : ''} onClick={() => setRoute('my-cvs')}>My CVs</button></header>{route === 'my-cvs' ? <CvListPage onCompare={(id) => { setRoute('editor'); runCompare(id); }} /> : <section className="cv-shell"><button type="button" className="save-pdf-button" onClick={() => window.print()}><MdOutlineSaveAs /></button><div className="editor-toolbar"><button type="button" className="secondary-btn" onClick={loadSnapshots} disabled={!cvId || isLoadingSnapshots}>{isLoadingSnapshots ? 'Loading snapshots…' : 'Snapshots'}</button><button type="button" className="secondary-btn" onClick={() => runCompare(cvId)} disabled={!cvId || isComparing}>{isComparing ? 'Comparing…' : 'Compare'}</button></div>{compareError && <p className="error-text">{compareError}</p>}<article ref={cvRef} className="cv-document" contentEditable suppressContentEditableWarning><h2>CV Editor</h2></article>{showSnapshotsModal && <div className="conflict-backdrop"><div className="conflict-modal"><h3>Snapshots</h3><ul>{snapshots.map((snapshot) => <li key={snapshot.id}><span>{formatUpdatedAt(snapshot.createdAt)}</span><button type="button" className="secondary-btn" onClick={() => runCompare(cvId, snapshot.id, 'current')}>Compare</button></li>)}</ul><div className="conflict-actions"><button type="button" className="secondary-btn" onClick={() => setShowSnapshotsModal(false)}>Close</button></div></div></div>}{compareData && <div className="compare-grid">{sections.map((section) => <div className="compare-row" key={section}><h4>{section}</h4><div className="compare-cols"><div><pre>{compareData.normalized.left?.[section] || ''}</pre><button type="button" onClick={() => applySection(section, 'left')}>Apply left section</button></div><div><pre>{compareData.normalized.right?.[section] || ''}</pre><button type="button" onClick={() => applySection(section, 'right')}>Apply right section</button></div></div></div>)}</div>}</section>}</main>;
 }
 
 export default App;
