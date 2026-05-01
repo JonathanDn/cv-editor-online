@@ -26,6 +26,7 @@ const MAX_LIMIT = 100;
 
 const cvs = [];
 let nextId = 1;
+const duplicateGuards = new Map();
 
 const sendJson = (res, status, body) => {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -65,7 +66,10 @@ const toDto = (cv) => ({
   title: cv.title,
   targetRole: cv.targetRole,
   targetCompany: cv.targetCompany,
+  content_json: cv.contentJson,
+  content_text: cv.contentText,
   status: cv.status,
+  createdAt: cv.createdAt,
   updatedAt: cv.updatedAt,
   lastOpenedAt: cv.lastOpenedAt
 });
@@ -100,6 +104,10 @@ const validatePayload = (payload, { requireTitle = false } = {}) => {
 
   if (payload.content_json !== undefined && !isPlainObject(payload.content_json) && !Array.isArray(payload.content_json)) {
     return 'content_json must be a JSON object or array';
+  }
+
+  if (payload.content_text !== undefined && payload.content_text !== null && typeof payload.content_text !== 'string') {
+    return 'content_text must be a string or null';
   }
 
   return null;
@@ -138,7 +146,9 @@ export const requestHandler = async (req, res) => {
           targetRole: payload.targetRole || null,
           targetCompany: payload.targetCompany || null,
           contentJson: payload.content_json ?? {},
+          contentText: payload.content_text ?? null,
           status: 'active',
+          createdAt: now,
           updatedAt: now,
           lastOpenedAt: now,
           deletedAt: null,
@@ -185,8 +195,50 @@ export const requestHandler = async (req, res) => {
         if (payload.targetRole !== undefined) cv.targetRole = payload.targetRole;
         if (payload.targetCompany !== undefined) cv.targetCompany = payload.targetCompany;
         if (payload.content_json !== undefined) cv.contentJson = payload.content_json;
+        if (payload.content_text !== undefined) cv.contentText = payload.content_text;
         cv.updatedAt = new Date().toISOString();
         return sendJson(res, 200, { data: toDto(cv) });
+      }
+
+      const duplicateMatch = pathname.match(/^\/api\/cvs\/([^/]+)\/duplicate$/);
+      if (duplicateMatch && method === 'POST') {
+        const sourceId = duplicateMatch[1];
+        const source = cvs.find((row) => row.id === sourceId && row.userId === userId && !row.deletedAt);
+        if (!source) return sendJson(res, 404, { error: 'Not found' });
+
+        const payload = await readJsonBody(req);
+        const err = validatePayload(payload, { requireTitle: false });
+        if (err) return sendJson(res, 400, { error: err });
+
+        const idemHeader = req.headers['idempotency-key'];
+        const idemKey = typeof idemHeader === 'string' ? idemHeader.trim() : '';
+        const guardKey = idemKey ? `${userId}:${sourceId}:${idemKey}` : `${userId}:${sourceId}:recent`;
+        const nowMs = Date.now();
+        const existing = duplicateGuards.get(guardKey);
+        if (existing && nowMs - existing.createdAtMs < 5000) {
+          const duplicated = cvs.find((row) => row.id === existing.cvId && row.userId === userId);
+          if (duplicated) return sendJson(res, 200, { data: toDto(duplicated) });
+        }
+
+        const now = new Date().toISOString();
+        const duplicated = {
+          id: String(nextId++),
+          userId,
+          title: payload.title !== undefined ? payload.title.trim() : source.title,
+          targetRole: payload.targetRole !== undefined ? payload.targetRole : source.targetRole,
+          targetCompany: payload.targetCompany !== undefined ? payload.targetCompany : source.targetCompany,
+          contentJson: source.contentJson,
+          contentText: source.contentText,
+          status: 'active',
+          createdAt: now,
+          updatedAt: now,
+          lastOpenedAt: now,
+          deletedAt: null,
+          archivedAt: null
+        };
+        cvs.push(duplicated);
+        duplicateGuards.set(guardKey, { cvId: duplicated.id, createdAtMs: nowMs });
+        return sendJson(res, 201, { data: toDto(duplicated) });
       }
 
       const actionMatch = pathname.match(/^\/api\/cvs\/([^/]+)\/(archive|delete|restore)$/);

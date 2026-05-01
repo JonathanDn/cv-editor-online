@@ -58,3 +58,63 @@ test('CV API CRUD, lifecycle, ownership and pagination', async () => {
 
   server.close();
 });
+
+test('CV duplicate endpoint supports overrides and idempotency guard', async () => {
+  const server = createAppServer();
+  server.listen(0);
+  await once(server, 'listening');
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+
+  const created = await jsonReq(base, '/api/cvs', {
+    method: 'POST',
+    body: {
+      title: 'Source CV',
+      targetRole: 'Engineer',
+      targetCompany: 'Acme',
+      content_json: { sections: [{ id: 1 }] },
+      content_text: 'plain text'
+    }
+  });
+  const sourceId = created.body.data.id;
+
+  const duplicate = await jsonReq(base, `/api/cvs/${sourceId}/duplicate`, {
+    method: 'POST',
+    body: { title: 'Copy CV', targetCompany: 'Beta Corp' }
+  });
+  assert.equal(duplicate.status, 201);
+  assert.notEqual(duplicate.body.data.id, sourceId);
+  assert.equal(duplicate.body.data.title, 'Copy CV');
+  assert.equal(duplicate.body.data.targetRole, 'Engineer');
+  assert.equal(duplicate.body.data.targetCompany, 'Beta Corp');
+  assert.deepEqual(duplicate.body.data.content_json, { sections: [{ id: 1 }] });
+  assert.equal(duplicate.body.data.content_text, 'plain text');
+
+  const idemHeaders = {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-user-id': 'u1',
+      'idempotency-key': 'dup-1'
+    },
+    body: JSON.stringify({})
+  };
+
+  const firstIdem = await fetch(`${base}/api/cvs/${sourceId}/duplicate`, idemHeaders);
+  const firstIdemBody = await firstIdem.json();
+  const secondIdem = await fetch(`${base}/api/cvs/${sourceId}/duplicate`, idemHeaders);
+  const secondIdemBody = await secondIdem.json();
+
+  assert.equal(firstIdem.status, 201);
+  assert.equal(secondIdem.status, 200);
+  assert.equal(firstIdemBody.data.id, secondIdemBody.data.id);
+
+  const unauthorized = await jsonReq(base, `/api/cvs/${sourceId}/duplicate`, {
+    method: 'POST',
+    userId: 'u2',
+    body: {}
+  });
+  assert.equal(unauthorized.status, 404);
+
+  server.close();
+});
