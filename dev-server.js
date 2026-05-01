@@ -71,6 +71,7 @@ const toDto = (cv) => ({
   status: cv.status,
   createdAt: cv.createdAt,
   updatedAt: cv.updatedAt,
+  revision: cv.updatedAt,
   lastOpenedAt: cv.lastOpenedAt
 });
 
@@ -108,6 +109,14 @@ const validatePayload = (payload, { requireTitle = false } = {}) => {
 
   if (payload.content_text !== undefined && payload.content_text !== null && typeof payload.content_text !== 'string') {
     return 'content_text must be a string or null';
+  }
+
+  if (payload.updated_at !== undefined && typeof payload.updated_at !== 'string') {
+    return 'updated_at must be a string';
+  }
+
+  if (payload.revision !== undefined && typeof payload.revision !== 'string') {
+    return 'revision must be a string';
   }
 
   return null;
@@ -193,6 +202,22 @@ export const requestHandler = async (req, res) => {
         const payload = await readJsonBody(req);
         const err = validatePayload(payload, { requireTitle: false });
         if (err) return sendJson(res, 400, { error: err });
+        const clientRevision = payload.updated_at ?? payload.revision;
+        if (!clientRevision) {
+          return sendJson(res, 400, { error: 'updated_at (or revision) is required' });
+        }
+        if (clientRevision !== cv.updatedAt) {
+          return sendJson(res, 409, {
+            error: 'Conflict',
+            code: 'CV_CONFLICT',
+            message: 'This CV changed elsewhere. Reload latest version.',
+            guidance: 'Please refresh/reload to get the latest version before saving.',
+            server: {
+              updated_at: cv.updatedAt,
+              revision: cv.updatedAt
+            }
+          });
+        }
 
         if (payload.title !== undefined) cv.title = payload.title.trim();
         if (payload.targetRole !== undefined) cv.targetRole = payload.targetRole;
