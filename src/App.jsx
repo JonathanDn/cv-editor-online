@@ -1,564 +1,254 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MdOutlineSaveAs } from 'react-icons/md';
 
-const LOCAL_STORAGE_KEY = 'cvEditorData';
-const CURRENT_TEMPLATE_VERSION = 6;
-const EXPERIENCE_JOB_SELECTOR = '.experience-container .panel .job';
-const ADDITIONAL_SECTION_SELECTOR = '.additional-section';
-const LANGUAGES_SECTION_SELECTOR = '.languages-section';
-const MAX_UNDO_STATES = 50;
+const TABS = [
+  { key: 'active', label: 'Active' },
+  { key: 'archived', label: 'Archived' },
+  { key: 'deleted', label: 'Deleted' },
+];
 
-const sixthExperienceMarkup = `
-  <div class="job">
-    <h4>Your Job Title Goes Here</h4>
-    <p class="job-meta">Company Name | Jan 2012 - Dec 2013</p>
-    <p>Highlight earlier relevant experience to show the breadth of your background.</p>
-    <ul>
-      <li>Call out achievements that demonstrate transferable skills.</li>
-    </ul>
-  </div>
-`;
+const AUTOSAVE_DELAY_MS = 7000;
 
-const additionalSectionMarkup = `
-  <section class="panel additional-section" data-testid="additional-section">
-    <h3>Additional Information</h3>
-    <p>Add extra achievements, projects, certifications, or volunteer work here.</p>
-  </section>
-`;
+const formatUpdatedAt = (value) => {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString();
+};
 
-const languagesSectionMarkup = `
-  <section class="panel languages-section" data-testid="languages-section">
-    <h3>Languages</h3>
-    <p>Hebrew (Mother tongue), English (Fluent), Arabic (Mostly reading)</p>
-  </section>
-`;
+const roleCompanyLabel = (cv) => {
+  if (cv.targetRole && cv.targetCompany) return `${cv.targetRole} / ${cv.targetCompany}`;
+  if (cv.targetRole) return cv.targetRole;
+  if (cv.targetCompany) return cv.targetCompany;
+  return '—';
+};
 
-const leftSectionMarkup = `
-  <section class="panel custom-left-section" data-testid="custom-left-section">
-    <h3>Section Title</h3>
-    <p>Add a short description for this left column section.</p>
-  </section>
-`;
+const parseCvId = () => {
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get('id');
+  return raw?.trim() || null;
+};
 
-function readStoredCvData() {
-  const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
-
-  if (!raw) {
-    return null;
+const parseContentJsonToHtml = (value) => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.join('');
+  if (typeof value === 'object') {
+    if (typeof value.html === 'string') return value.html;
+    if (typeof value.content === 'string') return value.content;
+    return JSON.stringify(value, null, 2);
   }
+  return String(value);
+};
 
-  try {
-    const parsed = JSON.parse(raw);
+function CvListPage() {
+  const [status, setStatus] = useState('active');
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [rows, setRows] = useState([]);
 
-    if (
-      parsed &&
-      typeof parsed === 'object' &&
-      typeof parsed.documentHtml === 'string' &&
-      typeof parsed.templateVersion === 'number'
-    ) {
-      return parsed;
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
-}
-
-function writeStoredCvData(documentHtml) {
-  const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
-  let existingData = {};
-
-  if (raw) {
+  const loadCvs = useCallback(async () => {
+    setIsLoading(true);
+    setError('');
     try {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') {
-        existingData = parsed;
-      }
-    } catch {
-      existingData = {};
+      const res = await fetch(`/api/cvs?status=${status}`, { headers: { 'x-user-id': 'u1' } });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.error || 'Could not load CVs.');
+      setRows(Array.isArray(payload?.data) ? payload.data : []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load CVs.');
+    } finally {
+      setIsLoading(false);
     }
-  }
+  }, [status]);
 
-  const payload = {
-    ...existingData,
-    documentHtml,
-    templateVersion: CURRENT_TEMPLATE_VERSION,
-    updatedAt: new Date().toISOString(),
-  };
+  useEffect(() => { loadCvs(); }, [loadCvs]);
 
-  window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(payload));
-}
+  const emptyMessage = useMemo(() => `No ${status} CVs yet.`, [status]);
+  const handleRestore = useCallback(async (id) => {
+    try {
+      const res = await fetch(`/api/cvs/${id}/restore`, { method: 'POST', headers: { 'x-user-id': 'u1' } });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.error || 'Could not restore CV.');
+      loadCvs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not restore CV.');
+    }
+  }, [loadCvs]);
 
-function migrateDocumentHtml(documentHtml, templateVersion) {
-  if (templateVersion >= CURRENT_TEMPLATE_VERSION) {
-    return documentHtml;
-  }
-
-  const wrapper = document.createElement('div');
-  wrapper.innerHTML = documentHtml;
-
-  const experiencePanel = wrapper.querySelector('.experience-container .panel');
-  const hasAdditionalSection = wrapper.querySelector(ADDITIONAL_SECTION_SELECTOR);
-  const hasLanguagesSection = wrapper.querySelector(LANGUAGES_SECTION_SELECTOR);
-
-  if (!experiencePanel) {
-    return documentHtml;
-  }
-
-  const existingJobs = experiencePanel.querySelectorAll(EXPERIENCE_JOB_SELECTOR);
-
-  if (existingJobs.length < 6) {
-    experiencePanel.insertAdjacentHTML('beforeend', sixthExperienceMarkup);
-  }
-
-  if (!hasAdditionalSection) {
-    const contentGrid = wrapper.querySelector('.content-grid');
-    contentGrid?.insertAdjacentHTML('afterend', additionalSectionMarkup);
-  }
-
-  if (!hasLanguagesSection) {
-    const awardsSection = wrapper.querySelector('.left-column .panel:nth-of-type(3)');
-    awardsSection?.insertAdjacentHTML('afterend', languagesSectionMarkup);
-  }
-
-  return wrapper.innerHTML;
+  return (
+    <section className="cvs-page">
+      <div className="cvs-header"><h1>My CVs</h1><button className="primary-btn" type="button">Create your first CV</button></div>
+      <div className="status-chips">{TABS.map((tab) => <button key={tab.key} className={`chip${status === tab.key ? ' active' : ''}`} type="button" onClick={() => setStatus(tab.key)}>{tab.label}</button>)}</div>
+      {isLoading && <div className="cvs-list skeleton-list" aria-busy="true">{Array.from({ length: 4 }).map((_, idx) => <div className="cv-row skeleton" key={idx} />)}</div>}
+      {!isLoading && error && <div className="error-state"><p>Failed to load CVs: {error}</p><button type="button" className="secondary-btn" onClick={loadCvs}>Retry</button></div>}
+      {!isLoading && !error && rows.length === 0 && <div className="empty-state"><p>{emptyMessage}</p><button className="primary-btn" type="button">Create your first CV</button></div>}
+      {!isLoading && !error && rows.length > 0 && (
+        <div className="cvs-list">
+          {rows.map((cv) => <article className="cv-row" key={cv.id}><div><h3>{cv.title}</h3><p>{roleCompanyLabel(cv)}</p><small>Updated {formatUpdatedAt(cv.updatedAt)}</small></div><div className="row-actions">{status === 'deleted' ? <button type="button" onClick={() => handleRestore(cv.id)}>Restore</button> : ['Open', 'Duplicate', 'Rename', 'Archive', 'Delete'].map((action) => <button type="button" key={action}>{action}</button>)}</div></article>)}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function App() {
+  const [route, setRoute] = useState('editor');
+  const [cvId] = useState(parseCvId);
+  const [saveState, setSaveState] = useState('Saved');
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [editorError, setEditorError] = useState('');
+  const [showConflictModal, setShowConflictModal] = useState(false);
+  const [showSnapshotsModal, setShowSnapshotsModal] = useState(false);
+  const [snapshots, setSnapshots] = useState([]);
+  const [isLoadingSnapshots, setIsLoadingSnapshots] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [currentRevision, setCurrentRevision] = useState(null);
   const cvRef = useRef(null);
-  const undoStackRef = useRef([]);
-  const redoStackRef = useRef([]);
-  const lastDocumentHtmlRef = useRef('');
-  const isApplyingHistoryRef = useRef(false);
-  const printCleanupTimeoutRef = useRef(null);
-  const [historyState, setHistoryState] = useState({
-    canUndo: false,
-    canRedo: false,
-  });
-  const [isPrinting, setIsPrinting] = useState(false);
+  const initialHtmlRef = useRef('');
+  const isHydratingRef = useRef(false);
 
-  const syncHistoryState = useCallback(() => {
-    setHistoryState({
-      canUndo: undoStackRef.current.length > 0,
-      canRedo: redoStackRef.current.length > 0,
-    });
-  }, []);
-
-  const persistDocument = useCallback((documentHtml) => {
-    writeStoredCvData(documentHtml);
-  }, []);
-
-  const handleSaveAsPdf = useCallback(() => {
-    setIsPrinting(true);
-    window.print();
-
-    if (printCleanupTimeoutRef.current) {
-      clearTimeout(printCleanupTimeoutRef.current);
+  const loadCv = useCallback(async () => {
+    if (!cvId || !cvRef.current) return;
+    setEditorError('');
+    setSaveState('Saving…');
+    try {
+      const res = await fetch(`/api/cvs/${cvId}`, { headers: { 'x-user-id': 'u1' } });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.error || 'Could not load CV.');
+      const html = parseContentJsonToHtml(payload?.data?.content_json);
+      isHydratingRef.current = true;
+      cvRef.current.innerHTML = html || '<h2>CV Editor</h2><p>Edit your CV content here.</p>';
+      initialHtmlRef.current = cvRef.current.innerHTML;
+      setCurrentRevision(payload?.data?.updatedAt || payload?.data?.revision || null);
+      setHasUnsavedChanges(false);
+      setSaveState('Saved');
+    } catch (err) {
+      setEditorError(err instanceof Error ? err.message : 'Could not load CV.');
+      setSaveState('Saved');
+    } finally {
+      isHydratingRef.current = false;
     }
+  }, [cvId]);
 
-    printCleanupTimeoutRef.current = window.setTimeout(() => {
-      setIsPrinting(false);
-    }, 1000);
+  useEffect(() => { loadCv(); }, [loadCv]);
+
+  const saveCv = useCallback(async (saveReason = 'autosave') => {
+    if (!cvId || !cvRef.current) return;
+    const html = cvRef.current.innerHTML;
+    setSaveState('Saving…');
+    setEditorError('');
+    try {
+      if (!currentRevision) {
+        throw new Error('Missing revision. Reload and try again.');
+      }
+      const res = await fetch(`/api/cvs/${cvId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': 'u1' },
+        body: JSON.stringify({
+          content_json: { html },
+          content_text: cvRef.current.innerText,
+          updated_at: currentRevision,
+          save_reason: saveReason
+        })
+      });
+      const payload = await res.json();
+      if (res.status === 409) {
+        setShowConflictModal(true);
+        throw new Error(payload?.message || 'This CV changed elsewhere. Reload latest version.');
+      }
+      if (!res.ok) throw new Error(payload?.error || 'Could not save CV.');
+      initialHtmlRef.current = html;
+      setCurrentRevision(payload?.data?.updatedAt || payload?.data?.revision || null);
+      setHasUnsavedChanges(false);
+      setSaveState('Saved');
+    } catch (err) {
+      setEditorError(err instanceof Error ? err.message : 'Could not save CV.');
+      setSaveState('Saved');
+    }
+  }, [cvId, currentRevision]);
+
+  useEffect(() => {
+    if (!cvRef.current) return undefined;
+    const onInput = () => {
+      if (isHydratingRef.current) return;
+      setHasUnsavedChanges(true);
+      setSaveState('Saved');
+    };
+    const node = cvRef.current;
+    node.addEventListener('input', onInput);
+    return () => node.removeEventListener('input', onInput);
   }, []);
 
   useEffect(() => {
-    const handleBeforePrint = () => {
-      setIsPrinting(true);
-    };
-
-    const handleAfterPrint = () => {
-      setIsPrinting(false);
-    };
-
-    window.addEventListener('beforeprint', handleBeforePrint);
-    window.addEventListener('afterprint', handleAfterPrint);
-
-    return () => {
-      window.removeEventListener('beforeprint', handleBeforePrint);
-      window.removeEventListener('afterprint', handleAfterPrint);
-
-      if (printCleanupTimeoutRef.current) {
-        clearTimeout(printCleanupTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  const handlePaste = useCallback((event) => {
-    event.preventDefault();
-    const text = event.clipboardData?.getData('text/plain') ?? '';
-    document.execCommand('insertText', false, text);
-  }, []);
-
-  const handleInput = useCallback(() => {
-    if (!cvRef.current || isApplyingHistoryRef.current) {
-      return;
-    }
-
-    const currentHtml = cvRef.current.innerHTML;
-    const previousHtml = lastDocumentHtmlRef.current;
-
-    if (currentHtml === previousHtml) {
-      return;
-    }
-
-    if (previousHtml) {
-      undoStackRef.current.push(previousHtml);
-      if (undoStackRef.current.length > MAX_UNDO_STATES) {
-        undoStackRef.current.shift();
-      }
-    }
-
-    redoStackRef.current = [];
-    lastDocumentHtmlRef.current = currentHtml;
-    persistDocument(currentHtml);
-    syncHistoryState();
-  }, [persistDocument, syncHistoryState]);
-
-  const applyHistoryState = useCallback((nextHtml) => {
-    if (!cvRef.current) {
-      return;
-    }
-
-    isApplyingHistoryRef.current = true;
-    cvRef.current.innerHTML = nextHtml;
-    lastDocumentHtmlRef.current = nextHtml;
-    persistDocument(nextHtml);
-    window.setTimeout(() => {
-      isApplyingHistoryRef.current = false;
-    }, 0);
-    syncHistoryState();
-  }, [persistDocument, syncHistoryState]);
-
-  const handleUndo = useCallback(() => {
-    if (!undoStackRef.current.length) {
-      return;
-    }
-
-    const currentHtml = lastDocumentHtmlRef.current;
-    const previousHtml = undoStackRef.current.pop();
-
-    if (currentHtml) {
-      redoStackRef.current.push(currentHtml);
-    }
-
-    if (previousHtml) {
-      applyHistoryState(previousHtml);
-    }
-  }, [applyHistoryState]);
-
-  const handleRedo = useCallback(() => {
-    if (!redoStackRef.current.length) {
-      return;
-    }
-
-    const currentHtml = lastDocumentHtmlRef.current;
-    const redoHtml = redoStackRef.current.pop();
-
-    if (currentHtml) {
-      undoStackRef.current.push(currentHtml);
-    }
-
-    if (redoHtml) {
-      applyHistoryState(redoHtml);
-    }
-  }, [applyHistoryState]);
-
-  const applyDocumentChange = useCallback((updater) => {
-    if (!cvRef.current || isApplyingHistoryRef.current) {
-      return;
-    }
-
-    const previousHtml = lastDocumentHtmlRef.current;
-    const wrapper = document.createElement('div');
-    wrapper.innerHTML = previousHtml;
-    const changed = updater(wrapper);
-
-    if (!changed) {
-      return;
-    }
-
-    const nextHtml = wrapper.innerHTML;
-
-    if (nextHtml === previousHtml) {
-      return;
-    }
-
-    undoStackRef.current.push(previousHtml);
-    if (undoStackRef.current.length > MAX_UNDO_STATES) {
-      undoStackRef.current.shift();
-    }
-
-    redoStackRef.current = [];
-    cvRef.current.innerHTML = nextHtml;
-    lastDocumentHtmlRef.current = nextHtml;
-    persistDocument(nextHtml);
-    syncHistoryState();
-  }, [persistDocument, syncHistoryState]);
-
-  const handleAddExperience = useCallback(() => {
-    applyDocumentChange((wrapper) => {
-      const experiencePanel = wrapper.querySelector('.experience-container .panel');
-      if (!experiencePanel) {
-        return false;
-      }
-
-      experiencePanel.insertAdjacentHTML('beforeend', sixthExperienceMarkup);
-      return true;
-    });
-  }, [applyDocumentChange]);
-
-  const handleAddLeftSection = useCallback(() => {
-    applyDocumentChange((wrapper) => {
-      const leftColumn = wrapper.querySelector('.left-column');
-      if (!leftColumn) {
-        return false;
-      }
-
-      leftColumn.insertAdjacentHTML('beforeend', leftSectionMarkup);
-      return true;
-    });
-  }, [applyDocumentChange]);
-
-  const handleKeyDown = useCallback((event) => {
-    const modifierPressed = event.metaKey || event.ctrlKey;
-
-    if (!modifierPressed || event.key.toLowerCase() !== 'z') {
-      return;
-    }
-
-    event.preventDefault();
-
-    if (event.shiftKey) {
-      handleRedo();
-      return;
-    }
-
-    handleUndo();
-  }, [handleRedo, handleUndo]);
+    if (!hasUnsavedChanges) return undefined;
+    const handle = window.setTimeout(() => { saveCv('autosave'); }, AUTOSAVE_DELAY_MS);
+    return () => window.clearTimeout(handle);
+  }, [hasUnsavedChanges, saveCv]);
 
   useEffect(() => {
-    if (!cvRef.current) {
-      return;
+    const onBeforeUnload = (event) => {
+      if (!hasUnsavedChanges) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  const handleNavigate = useCallback((nextRoute) => {
+    if (hasUnsavedChanges) {
+      const shouldLeave = window.confirm('You have unsaved changes. Leave this page?');
+      if (!shouldLeave) return;
     }
+    setRoute(nextRoute);
+  }, [hasUnsavedChanges]);
 
-    const storedCvData = readStoredCvData();
-
-    if (storedCvData?.documentHtml) {
-      const migratedDocumentHtml = migrateDocumentHtml(
-        storedCvData.documentHtml,
-        storedCvData.templateVersion
-      );
-
-      cvRef.current.innerHTML = migratedDocumentHtml;
-      lastDocumentHtmlRef.current = migratedDocumentHtml;
-      syncHistoryState();
-
-      if (
-        storedCvData.templateVersion !== CURRENT_TEMPLATE_VERSION ||
-        storedCvData.documentHtml !== migratedDocumentHtml
-      ) {
-        writeStoredCvData(migratedDocumentHtml);
-      }
-
-      return;
+  const handleSaveAsPdf = useCallback(() => { if (!cvRef.current) return; window.print(); }, []);
+  const loadSnapshots = useCallback(async () => {
+    if (!cvId) return;
+    setIsLoadingSnapshots(true);
+    setEditorError('');
+    try {
+      const res = await fetch(`/api/cvs/${cvId}/snapshots`, { headers: { 'x-user-id': 'u1' } });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.error || 'Could not load snapshots.');
+      setSnapshots(Array.isArray(payload?.data) ? payload.data : []);
+      setShowSnapshotsModal(true);
+    } catch (err) {
+      setEditorError(err instanceof Error ? err.message : 'Could not load snapshots.');
+    } finally {
+      setIsLoadingSnapshots(false);
     }
-
-    lastDocumentHtmlRef.current = cvRef.current.innerHTML;
-    persistDocument(cvRef.current.innerHTML);
-    syncHistoryState();
-  }, [persistDocument, syncHistoryState]);
+  }, [cvId]);
+  const restoreSnapshot = useCallback(async (snapshotId) => {
+    if (!cvId) return;
+    const shouldCreateSnapshot = window.confirm('Create a pre_restore snapshot before restoring?');
+    setEditorError('');
+    try {
+      const res = await fetch(`/api/cvs/${cvId}/restore-snapshot/${snapshotId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': 'u1' },
+        body: JSON.stringify({ create_pre_restore: shouldCreateSnapshot })
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.error || 'Could not restore snapshot.');
+      await loadCv();
+      setToastMessage('Snapshot restored successfully.');
+      setShowSnapshotsModal(false);
+      window.setTimeout(() => setToastMessage(''), 3000);
+    } catch (err) {
+      setEditorError(err instanceof Error ? err.message : 'Could not restore snapshot.');
+    }
+  }, [cvId, loadCv]);
 
   return (
-    <main className={`page${isPrinting ? ' is-printing' : ''}`}>
-      <header className="toolbar" aria-label="CV editor controls">
-        <h1>CV Editor</h1>
-        <p>Click any text in the template to edit it.</p>
+    <main className="page">
+      <header className="app-nav">
+        <button type="button" className={route === 'editor' ? 'active' : ''} onClick={() => handleNavigate('editor')}>Editor</button>
+        <button type="button" className={route === 'my-cvs' ? 'active' : ''} onClick={() => handleNavigate('my-cvs')}>My CVs</button>
       </header>
-
-      <section className="cv-layout">
-        {!isPrinting && (
-          <div className="history-controls" aria-label="History controls">
-            <button type="button" className="history-button" onClick={handleUndo} disabled={!historyState.canUndo}>
-              Undo
-            </button>
-            <button type="button" className="history-button" onClick={handleRedo} disabled={!historyState.canRedo}>
-              Redo
-            </button>
-            <button type="button" className="history-button" onClick={handleAddExperience}>
-              Add Experience
-            </button>
-            <button type="button" className="history-button" onClick={handleAddLeftSection}>
-              Add Left Section
-            </button>
-          </div>
-        )}
-
-        <section className="cv-shell">
-          <button
-            type="button"
-            className="save-pdf-button"
-            onClick={handleSaveAsPdf}
-            aria-label="Save as PDF"
-            title="Save as PDF"
-          >
-            <MdOutlineSaveAs className="save-pdf-icon" aria-hidden="true" focusable="false" />
-          </button>
-
-          <article
-            ref={cvRef}
-            className="cv-document"
-            contentEditable
-            suppressContentEditableWarning
-            spellCheck={false}
-            aria-label="Editable CV template"
-            onPaste={handlePaste}
-            onInput={handleInput}
-            onKeyDown={handleKeyDown}
-          >
-          <header className="profile-container hero" data-testid="profile-container">
-            <h2 className="hero-name">
-              <span className="hero-first">JANE</span>
-              <span className="hero-last">AUSTEN</span>
-            </h2>
-            <p className="hero-title">PROFESSIONAL TITLE</p>
-            <p className="hero-summary">
-              Summarise yourself and why you're a good fit for the role in a few sentences. Your CV is meant to help you
-              get an interview, so make them want to know you more. Help do this by tailoring your CV to the job you're
-              applying for - of course your education and experience doesn't change, but what you highlight should.
-            </p>
-          </header>
-
-          <section className="content-grid" data-testid="columns-container">
-            <aside className="contact-container left-column" data-testid="contact-container">
-              <section className="panel">
-                <h3>Contact</h3>
-                <p>+1 123 1234 1123 ☎</p>
-                <p>personalemail@email.com ✉</p>
-                <p>LinkedIn.com/username 👤</p>
-              </section>
-
-              <section className="panel">
-                <h3>Education</h3>
-                <div className="item">
-                  <h4>Qualification</h4>
-                  <p>Institution/University</p>
-                  <p>2014 - 2015</p>
-                </div>
-                <div className="item">
-                  <h4>Qualification</h4>
-                  <p>Institution/University</p>
-                  <p>2010 - 2014</p>
-                </div>
-                <div className="item">
-                  <h4>Qualification</h4>
-                  <p>Institution/University</p>
-                  <p>2008 - 2010</p>
-                </div>
-              </section>
-
-              <section className="panel">
-                <h3>Awards</h3>
-                <div className="item">
-                  <h4>Name of award</h4>
-                  <p>Organisation</p>
-                  <p>2017</p>
-                </div>
-                <div className="item">
-                  <h4>Name of award</h4>
-                  <p>Organisation</p>
-                  <p>2014</p>
-                </div>
-              </section>
-
-              <section className="panel languages-section" data-testid="languages-section">
-                <h3>Languages</h3>
-                <p>Hebrew (Mother tongue), English (Fluent), Arabic (Mostly reading)</p>
-              </section>
-            </aside>
-
-            <section className="experience-container right-column" data-testid="experience-container">
-              <section className="panel">
-                <h3>Experience</h3>
-
-                <div className="job">
-                  <h4>Your Job Title Goes Here</h4>
-                  <p className="job-meta">Company Name | Dec 2018 - Current</p>
-                  <p>
-                    Briefly summarise your responsibilities. But what recruiters really want to see is the impact you've
-                    had, so use the bullet points to give specific examples of some of the key achievements you had in
-                    the role.
-                  </p>
-                  <ul>
-                    <li>For example, did you increase sales by 50% over 6 months</li>
-                    <li>Or perhaps you negotiated a new contract with a different supplier, saving your company $x a year</li>
-                    <li>Make sure the examples are specific, measurable and related to the job you're applying for</li>
-                  </ul>
-                </div>
-
-                <div className="job">
-                  <h4>Your Job Title Goes Here</h4>
-                  <p className="job-meta">Company Name | Sept 2016 - Dec 2018</p>
-                  <p>
-                    Remember to turn on Spelling and Grammar, and make sure you check and check again for typos, errors
-                    and formatting issues- zooming in helps here.
-                  </p>
-                  <ul>
-                    <li>Try not to waffle and keep your points succinct</li>
-                    <li>Avoid clichés and tell the truth. Use active verbs.</li>
-                  </ul>
-                </div>
-
-                <div className="job">
-                  <h4>Your Job Title Goes Here</h4>
-                  <p className="job-meta">Company Name | Sept 2016 - Dec 2018</p>
-                  <p>
-                    Remember to turn on Spelling and Grammar, and make sure you check and check again for typos, errors
-                    and formatting issues- zooming in helps here.
-                  </p>
-                  <ul>
-                    <li>Try not to waffle and keep your points succinct</li>
-                    <li>Avoid clichés and tell the truth. Use active verbs.</li>
-                  </ul>
-                </div>
-
-                <div className="job">
-                  <h4>Your Job Title Goes Here</h4>
-                  <p className="job-meta">Company Name | Jan 2014 - Aug 2016</p>
-                  <p>Include your earlier experience when it supports the role you're applying for.</p>
-                  <ul>
-                    <li>Keep each point concise and focused on impact.</li>
-                  </ul>
-                </div>
-
-                <div className="job">
-                  <h4>Your Job Title Goes Here</h4>
-                  <p className="job-meta">Company Name | Jan 2012 - Dec 2013</p>
-                  <p>Highlight earlier relevant experience to show the breadth of your background.</p>
-                  <ul>
-                    <li>Call out achievements that demonstrate transferable skills.</li>
-                  </ul>
-                </div>
-
-                <div className="job">
-                  <h4>Your Job Title Goes Here</h4>
-                  <p className="job-meta">Company Name | Jan 2010 - Dec 2011</p>
-                  <p>Include foundational experience that still supports your current career direction.</p>
-                  <ul>
-                    <li>Focus on relevant outcomes and transferable strengths.</li>
-                  </ul>
-                </div>
-              </section>
-            </section>
-          </section>
-
-          <section className="panel additional-section" data-testid="additional-section">
-            <h3>Additional Information</h3>
-            <p>Add extra achievements, projects, certifications, or volunteer work here.</p>
-          </section>
-          </article>
-        </section>
-      </section>
+      {route === 'my-cvs' ? <CvListPage /> : <section className="cv-shell"><button type="button" className="save-pdf-button" onClick={handleSaveAsPdf} aria-label="Save as PDF" title="Save as PDF"><MdOutlineSaveAs className="save-pdf-icon" /></button><div className="editor-toolbar"><button type="button" className="secondary-btn" onClick={() => saveCv('manual_save')} disabled={!cvId}>Save</button><button type="button" className="secondary-btn" onClick={loadSnapshots} disabled={!cvId || isLoadingSnapshots}>{isLoadingSnapshots ? 'Loading snapshots…' : 'Snapshots'}</button><small>{saveState}</small></div>{toastMessage && <p>{toastMessage}</p>}{editorError && <p className="error-text">{editorError}</p>}<article ref={cvRef} className="cv-document" contentEditable suppressContentEditableWarning><h2>CV Editor</h2><p>Edit your CV content here.</p></article>{showSnapshotsModal && <div className="conflict-backdrop" role="dialog" aria-modal="true" aria-labelledby="snapshots-title"><div className="conflict-modal"><h3 id="snapshots-title">Snapshots</h3>{snapshots.length === 0 ? <p>No snapshots yet.</p> : <ul>{snapshots.map((snapshot) => <li key={snapshot.id}><span>{formatUpdatedAt(snapshot.createdAt)} ({snapshot.reason || 'unknown'})</span><button type="button" className="secondary-btn" onClick={() => restoreSnapshot(snapshot.id)}>Restore</button></li>)}</ul>}<div className="conflict-actions"><button type="button" className="secondary-btn" onClick={() => setShowSnapshotsModal(false)}>Close</button></div></div></div>}{showConflictModal && <div className="conflict-backdrop" role="dialog" aria-modal="true" aria-labelledby="conflict-title"><div className="conflict-modal"><h3 id="conflict-title">This CV changed elsewhere. Reload latest version.</h3><p>Reload to continue editing with the newest content.</p><div className="conflict-actions"><button type="button" className="primary-btn" onClick={() => { setShowConflictModal(false); loadCv(); }}>Reload latest version</button><button type="button" className="secondary-btn" onClick={() => setShowConflictModal(false)}>Close</button></div></div></div>}</section>}
     </main>
   );
 }
