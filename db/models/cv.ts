@@ -13,4 +13,5 @@ export interface CvEntity {
   updated_at: string;
   last_opened_at: string;
   deleted_at: string | null;
+  folder_id: string;
 }

@@ -11,6 +11,7 @@ export interface CreateCvInput {
   content_text?: string | null;
   status?: CvStatus;
   last_opened_at?: string;
+  folder_id?: string;
 }
 
 export interface UpdateCvInput {
@@ -23,4 +24,5 @@ export interface UpdateCvInput {
   updated_at?: string;
   last_opened_at?: string;
   deleted_at?: string | null;
+  folder_id?: string | null;
 }

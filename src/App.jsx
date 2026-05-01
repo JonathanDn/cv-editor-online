@@ -46,12 +46,17 @@ function CvListPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [rows, setRows] = useState([]);
+  const [tagFilter, setTagFilter] = useState('');
+  const [folderFilter, setFolderFilter] = useState('');
 
   const loadCvs = useCallback(async () => {
     setIsLoading(true);
     setError('');
     try {
-      const res = await fetch(`/api/cvs?status=${status}`, { headers: { 'x-user-id': 'u1' } });
+      const params = new URLSearchParams({ status });
+      if (tagFilter) params.set('tag', tagFilter);
+      if (folderFilter) params.set('folder_id', folderFilter);
+      const res = await fetch(`/api/cvs?${params.toString()}`, { headers: { 'x-user-id': 'u1' } });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload?.error || 'Could not load CVs.');
       setRows(Array.isArray(payload?.data) ? payload.data : []);
@@ -60,7 +65,7 @@ function CvListPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [status]);
+  }, [status, tagFilter, folderFilter]);
 
   useEffect(() => { loadCvs(); }, [loadCvs]);
 
@@ -75,17 +80,30 @@ function CvListPage() {
       setError(err instanceof Error ? err.message : 'Could not restore CV.');
     }
   }, [loadCvs]);
+  const assignTag = useCallback(async (id, tag) => {
+    if (!tag) return;
+    await fetch(`/api/cvs/${id}/tags/${encodeURIComponent(tag)}`, { method: 'PUT', headers: { 'x-user-id': 'u1' } });
+    loadCvs();
+  }, [loadCvs]);
+  const moveFolder = useCallback(async (id, folderId) => {
+    await fetch(`/api/cvs/${id}/move`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-user-id': 'u1' }, body: JSON.stringify({ folder_id: folderId || null }) });
+    loadCvs();
+  }, [loadCvs]);
 
   return (
     <section className="cvs-page">
       <div className="cvs-header"><h1>My CVs</h1><button className="primary-btn" type="button">Create your first CV</button></div>
       <div className="status-chips">{TABS.map((tab) => <button key={tab.key} className={`chip${status === tab.key ? ' active' : ''}`} type="button" onClick={() => setStatus(tab.key)}>{tab.label}</button>)}</div>
+      <div className="status-chips">
+        <input placeholder="Filter by tag" value={tagFilter} onChange={(e) => setTagFilter(e.target.value.trim().toLowerCase())} />
+        <input placeholder="Filter by folder" value={folderFilter} onChange={(e) => setFolderFilter(e.target.value.trim())} />
+      </div>
       {isLoading && <div className="cvs-list skeleton-list" aria-busy="true">{Array.from({ length: 4 }).map((_, idx) => <div className="cv-row skeleton" key={idx} />)}</div>}
       {!isLoading && error && <div className="error-state"><p>Failed to load CVs: {error}</p><button type="button" className="secondary-btn" onClick={loadCvs}>Retry</button></div>}
       {!isLoading && !error && rows.length === 0 && <div className="empty-state"><p>{emptyMessage}</p><button className="primary-btn" type="button">Create your first CV</button></div>}
       {!isLoading && !error && rows.length > 0 && (
         <div className="cvs-list">
-          {rows.map((cv) => <article className="cv-row" key={cv.id}><div><h3>{cv.title}</h3><p>{roleCompanyLabel(cv)}</p><small>Updated {formatUpdatedAt(cv.updatedAt)}</small></div><div className="row-actions">{status === 'deleted' ? <button type="button" onClick={() => handleRestore(cv.id)}>Restore</button> : ['Open', 'Duplicate', 'Rename', 'Archive', 'Delete'].map((action) => <button type="button" key={action}>{action}</button>)}</div></article>)}
+          {rows.map((cv) => <article className="cv-row" key={cv.id}><div><h3>{cv.title}</h3><p>{roleCompanyLabel(cv)}</p><small>Updated {formatUpdatedAt(cv.updatedAt)} · Folder: {cv.folderId || 'inbox'} · Tags: {(cv.tags || []).join(', ') || 'none'}</small></div><div className="row-actions">{status === 'deleted' ? <button type="button" onClick={() => handleRestore(cv.id)}>Restore</button> : <><button type="button" onClick={() => assignTag(cv.id, window.prompt('Tag name')?.trim().toLowerCase() || '')}>Tag</button><button type="button" onClick={() => moveFolder(cv.id, window.prompt('Folder ID (blank for inbox)')?.trim() || '')}>Move</button>{['Open', 'Duplicate', 'Rename', 'Archive', 'Delete'].map((action) => <button type="button" key={action}>{action}</button>)}</>}</div></article>)}
         </div>
       )}
     </section>
@@ -104,6 +122,8 @@ function App() {
   const [isLoadingSnapshots, setIsLoadingSnapshots] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [currentRevision, setCurrentRevision] = useState(null);
+  const [editorTagInput, setEditorTagInput] = useState('');
+  const [editorFolderInput, setEditorFolderInput] = useState('');
   const cvRef = useRef(null);
   const initialHtmlRef = useRef('');
   const isHydratingRef = useRef(false);
@@ -241,6 +261,15 @@ function App() {
       setEditorError(err instanceof Error ? err.message : 'Could not restore snapshot.');
     }
   }, [cvId, loadCv]);
+  const addEditorTag = useCallback(async () => {
+    if (!cvId || !editorTagInput.trim()) return;
+    await fetch(`/api/cvs/${cvId}/tags/${encodeURIComponent(editorTagInput.trim().toLowerCase())}`, { method: 'PUT', headers: { 'x-user-id': 'u1' } });
+    setEditorTagInput('');
+  }, [cvId, editorTagInput]);
+  const moveEditorFolder = useCallback(async () => {
+    if (!cvId) return;
+    await fetch(`/api/cvs/${cvId}/move`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-user-id': 'u1' }, body: JSON.stringify({ folder_id: editorFolderInput.trim() || null }) });
+  }, [cvId, editorFolderInput]);
 
   return (
     <main className="page">
@@ -248,7 +277,7 @@ function App() {
         <button type="button" className={route === 'editor' ? 'active' : ''} onClick={() => handleNavigate('editor')}>Editor</button>
         <button type="button" className={route === 'my-cvs' ? 'active' : ''} onClick={() => handleNavigate('my-cvs')}>My CVs</button>
       </header>
-      {route === 'my-cvs' ? <CvListPage /> : <section className="cv-shell"><button type="button" className="save-pdf-button" onClick={handleSaveAsPdf} aria-label="Save as PDF" title="Save as PDF"><MdOutlineSaveAs className="save-pdf-icon" /></button><div className="editor-toolbar"><button type="button" className="secondary-btn" onClick={() => saveCv('manual_save')} disabled={!cvId}>Save</button><button type="button" className="secondary-btn" onClick={loadSnapshots} disabled={!cvId || isLoadingSnapshots}>{isLoadingSnapshots ? 'Loading snapshots…' : 'Snapshots'}</button><small>{saveState}</small></div>{toastMessage && <p>{toastMessage}</p>}{editorError && <p className="error-text">{editorError}</p>}<article ref={cvRef} className="cv-document" contentEditable suppressContentEditableWarning><h2>CV Editor</h2><p>Edit your CV content here.</p></article>{showSnapshotsModal && <div className="conflict-backdrop" role="dialog" aria-modal="true" aria-labelledby="snapshots-title"><div className="conflict-modal"><h3 id="snapshots-title">Snapshots</h3>{snapshots.length === 0 ? <p>No snapshots yet.</p> : <ul>{snapshots.map((snapshot) => <li key={snapshot.id}><span>{formatUpdatedAt(snapshot.createdAt)} ({snapshot.reason || 'unknown'})</span><button type="button" className="secondary-btn" onClick={() => restoreSnapshot(snapshot.id)}>Restore</button></li>)}</ul>}<div className="conflict-actions"><button type="button" className="secondary-btn" onClick={() => setShowSnapshotsModal(false)}>Close</button></div></div></div>}{showConflictModal && <div className="conflict-backdrop" role="dialog" aria-modal="true" aria-labelledby="conflict-title"><div className="conflict-modal"><h3 id="conflict-title">This CV changed elsewhere. Reload latest version.</h3><p>Reload to continue editing with the newest content.</p><div className="conflict-actions"><button type="button" className="primary-btn" onClick={() => { setShowConflictModal(false); loadCv(); }}>Reload latest version</button><button type="button" className="secondary-btn" onClick={() => setShowConflictModal(false)}>Close</button></div></div></div>}</section>}
+      {route === 'my-cvs' ? <CvListPage /> : <section className="cv-shell"><button type="button" className="save-pdf-button" onClick={handleSaveAsPdf} aria-label="Save as PDF" title="Save as PDF"><MdOutlineSaveAs className="save-pdf-icon" /></button><div className="editor-toolbar"><button type="button" className="secondary-btn" onClick={() => saveCv('manual_save')} disabled={!cvId}>Save</button><button type="button" className="secondary-btn" onClick={loadSnapshots} disabled={!cvId || isLoadingSnapshots}>{isLoadingSnapshots ? 'Loading snapshots…' : 'Snapshots'}</button><input placeholder="Tag" value={editorTagInput} onChange={(e) => setEditorTagInput(e.target.value)} /><button type="button" className="secondary-btn" onClick={addEditorTag} disabled={!cvId}>Add tag</button><input placeholder="Folder" value={editorFolderInput} onChange={(e) => setEditorFolderInput(e.target.value)} /><button type="button" className="secondary-btn" onClick={moveEditorFolder} disabled={!cvId}>Move</button><small>{saveState}</small></div>{toastMessage && <p>{toastMessage}</p>}{editorError && <p className="error-text">{editorError}</p>}<article ref={cvRef} className="cv-document" contentEditable suppressContentEditableWarning><h2>CV Editor</h2><p>Edit your CV content here.</p></article>{showSnapshotsModal && <div className="conflict-backdrop" role="dialog" aria-modal="true" aria-labelledby="snapshots-title"><div className="conflict-modal"><h3 id="snapshots-title">Snapshots</h3>{snapshots.length === 0 ? <p>No snapshots yet.</p> : <ul>{snapshots.map((snapshot) => <li key={snapshot.id}><span>{formatUpdatedAt(snapshot.createdAt)} ({snapshot.reason || 'unknown'})</span><button type="button" className="secondary-btn" onClick={() => restoreSnapshot(snapshot.id)}>Restore</button></li>)}</ul>}<div className="conflict-actions"><button type="button" className="secondary-btn" onClick={() => setShowSnapshotsModal(false)}>Close</button></div></div></div>}{showConflictModal && <div className="conflict-backdrop" role="dialog" aria-modal="true" aria-labelledby="conflict-title"><div className="conflict-modal"><h3 id="conflict-title">This CV changed elsewhere. Reload latest version.</h3><p>Reload to continue editing with the newest content.</p><div className="conflict-actions"><button type="button" className="primary-btn" onClick={() => { setShowConflictModal(false); loadCv(); }}>Reload latest version</button><button type="button" className="secondary-btn" onClick={() => setShowConflictModal(false)}>Close</button></div></div></div>}</section>}
     </main>
   );
 }
