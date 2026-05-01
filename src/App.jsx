@@ -102,13 +102,52 @@ function App() { /* unchanged */
   const [compareData, setCompareData] = useState(null);
   const [compareError, setCompareError] = useState('');
   const [isComparing, setIsComparing] = useState(false);
+  const [importMessage, setImportMessage] = useState('');
   const cvRef = useRef(null);
+  const fileInputRef = useRef(null);
   const loadSnapshots = useCallback(async () => { if (!cvId) return; setIsLoadingSnapshots(true); const res = await fetch(`/api/cvs/${cvId}/snapshots`, { headers: { 'x-user-id': 'u1' } }); const payload = await res.json(); setSnapshots(Array.isArray(payload?.data) ? payload.data : []); setShowSnapshotsModal(true); setIsLoadingSnapshots(false); }, [cvId]);
   const runCompare = useCallback(async (baseCvId, leftSnapshotId = 'current', rightSnapshotId = 'current') => { setCompareError(''); setIsComparing(true); try { const params = new URLSearchParams({ left: leftSnapshotId, right: rightSnapshotId }); const res = await fetch(`/api/cvs/${baseCvId}/compare?${params.toString()}`, { headers: { 'x-user-id': 'u1' } }); const payload = await res.json(); if (!res.ok) throw new Error(payload?.error || 'Could not compare versions.'); setCompareData(payload?.data || null);} catch (err) { setCompareError(err instanceof Error ? err.message : 'Could not compare versions.'); } finally { setIsComparing(false); } }, []);
   const applySection = useCallback((sectionName, side) => { if (!cvRef.current || !compareData?.normalized?.[side]?.[sectionName]) return; cvRef.current.innerHTML += `
 <section><h3>${sectionName}</h3><p>${compareData.normalized[side][sectionName]}</p></section>`; }, [compareData]);
+  const exportJson = useCallback(async () => {
+    if (!cvId) return;
+    const res = await fetch(`/api/cvs/${cvId}/export/json`, { headers: { 'x-user-id': 'u1' } });
+    const payload = await res.json();
+    if (!res.ok) { setImportMessage(payload?.error || 'Export failed.'); return; }
+    const blob = new Blob([JSON.stringify(payload.data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cv-${cvId}-export.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setImportMessage('Export complete.');
+  }, [cvId]);
+  const importJson = useCallback(async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const raw = await file.text();
+      const parsed = JSON.parse(raw);
+      const res = await fetch('/api/cvs/import/json', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-user-id': 'u1' },
+        body: JSON.stringify(parsed)
+      });
+      const payload = await res.json();
+      if (!res.ok) {
+        setImportMessage(payload?.message || payload?.error || 'Import failed.');
+        return;
+      }
+      setImportMessage(`Imported as a new CV copy: "${payload.data.title}"`);
+    } catch {
+      setImportMessage('Import failed: invalid JSON file.');
+    } finally {
+      event.target.value = '';
+    }
+  }, []);
   const sections = extractSections(compareData?.sections);
-  return <main className="page"><header className="app-nav"><button type="button" className={route === 'editor' ? 'active' : ''} onClick={() => setRoute('editor')}>Editor</button><button type="button" className={route === 'my-cvs' ? 'active' : ''} onClick={() => setRoute('my-cvs')}>My CVs</button></header>{route === 'my-cvs' ? <CvListPage onCompare={(id) => { setRoute('editor'); runCompare(id); }} /> : <section className="cv-shell"><button type="button" className="save-pdf-button" onClick={() => window.print()}><MdOutlineSaveAs /></button><div className="editor-toolbar"><button type="button" className="secondary-btn" onClick={loadSnapshots} disabled={!cvId || isLoadingSnapshots}>{isLoadingSnapshots ? 'Loading snapshots…' : 'Snapshots'}</button><button type="button" className="secondary-btn" onClick={() => runCompare(cvId)} disabled={!cvId || isComparing}>{isComparing ? 'Comparing…' : 'Compare'}</button></div>{compareError && <p className="error-text">{compareError}</p>}<article ref={cvRef} className="cv-document" contentEditable suppressContentEditableWarning><h2>CV Editor</h2></article>{showSnapshotsModal && <div className="conflict-backdrop"><div className="conflict-modal"><h3>Snapshots</h3><ul>{snapshots.map((snapshot) => <li key={snapshot.id}><span>{formatUpdatedAt(snapshot.createdAt)}</span><button type="button" className="secondary-btn" onClick={() => runCompare(cvId, snapshot.id, 'current')}>Compare</button></li>)}</ul><div className="conflict-actions"><button type="button" className="secondary-btn" onClick={() => setShowSnapshotsModal(false)}>Close</button></div></div></div>}{compareData && <div className="compare-grid">{sections.map((section) => <div className="compare-row" key={section}><h4>{section}</h4><div className="compare-cols"><div><pre>{compareData.normalized.left?.[section] || ''}</pre><button type="button" onClick={() => applySection(section, 'left')}>Apply left section</button></div><div><pre>{compareData.normalized.right?.[section] || ''}</pre><button type="button" onClick={() => applySection(section, 'right')}>Apply right section</button></div></div></div>)}</div>}</section>}</main>;
+  return <main className="page"><header className="app-nav"><button type="button" className={route === 'editor' ? 'active' : ''} onClick={() => setRoute('editor')}>Editor</button><button type="button" className={route === 'my-cvs' ? 'active' : ''} onClick={() => setRoute('my-cvs')}>My CVs</button></header>{route === 'my-cvs' ? <CvListPage onCompare={(id) => { setRoute('editor'); runCompare(id); }} /> : <section className="cv-shell"><button type="button" className="save-pdf-button" onClick={() => window.print()}><MdOutlineSaveAs /></button><div className="editor-toolbar"><button type="button" className="secondary-btn" onClick={loadSnapshots} disabled={!cvId || isLoadingSnapshots}>{isLoadingSnapshots ? 'Loading snapshots…' : 'Snapshots'}</button><button type="button" className="secondary-btn" onClick={() => runCompare(cvId)} disabled={!cvId || isComparing}>{isComparing ? 'Comparing…' : 'Compare'}</button><button type="button" className="secondary-btn" onClick={exportJson} disabled={!cvId}>Export JSON</button><button type="button" className="secondary-btn" onClick={() => fileInputRef.current?.click()}>Import JSON</button><input ref={fileInputRef} type="file" accept="application/json" hidden onChange={importJson} /></div><p className="helper-text">Import always creates a new CV copy and does not overwrite your current document.</p>{importMessage && <p className="error-text">{importMessage}</p>}{compareError && <p className="error-text">{compareError}</p>}<article ref={cvRef} className="cv-document" contentEditable suppressContentEditableWarning><h2>CV Editor</h2></article>{showSnapshotsModal && <div className="conflict-backdrop"><div className="conflict-modal"><h3>Snapshots</h3><ul>{snapshots.map((snapshot) => <li key={snapshot.id}><span>{formatUpdatedAt(snapshot.createdAt)}</span><button type="button" className="secondary-btn" onClick={() => runCompare(cvId, snapshot.id, 'current')}>Compare</button></li>)}</ul><div className="conflict-actions"><button type="button" className="secondary-btn" onClick={() => setShowSnapshotsModal(false)}>Close</button></div></div></div>}{compareData && <div className="compare-grid">{sections.map((section) => <div className="compare-row" key={section}><h4>{section}</h4><div className="compare-cols"><div><pre>{compareData.normalized.left?.[section] || ''}</pre><button type="button" onClick={() => applySection(section, 'left')}>Apply left section</button></div><div><pre>{compareData.normalized.right?.[section] || ''}</pre><button type="button" onClick={() => applySection(section, 'right')}>Apply right section</button></div></div></div>)}</div>}</section>}</main>;
 }
 
 export default App;
