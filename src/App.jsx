@@ -144,7 +144,7 @@ function App() { /* unchanged */
 
   const restoreSnapshot = useCallback(async (snapshotId) => {
     if (!cvId || !snapshotId) return;
-    await fetch(`/api/cvs/${cvId}/snapshots/${snapshotId}/restore`, { method: 'POST', headers: { 'x-user-id': 'u1' } });
+    await fetch(`/api/cvs/${cvId}/restore-snapshot/${snapshotId}`, { method: 'POST', headers: { 'x-user-id': 'u1' } });
     setShowConflictModal(true);
   }, [cvId]);
 
