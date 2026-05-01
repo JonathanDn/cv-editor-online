@@ -164,3 +164,148 @@ test('Snapshots: creation and retention limit enforcement', async () => {
 
   server.close();
 });
+
+test('Tags/folders: assign, unassign, move, and filter', async () => {
+  const server = createAppServer();
+  server.listen(0);
+  await once(server, 'listening');
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+
+  const created = await jsonReq(base, '/api/cvs', { method: 'POST', body: { title: 'Filter CV' } });
+  assert.equal(created.status, 201);
+  const id = created.body.data.id;
+  assert.equal(created.body.data.folderId, 'inbox');
+
+  const tagged = await jsonReq(base, `/api/cvs/${id}/tags/engineering`, { method: 'PUT' });
+  assert.equal(tagged.status, 200);
+  assert.ok(tagged.body.data.tags.includes('engineering'));
+
+  const moved = await jsonReq(base, `/api/cvs/${id}/move`, { method: 'POST', body: { folder_id: 'onsite' } });
+  assert.equal(moved.status, 200);
+  assert.equal(moved.body.data.folderId, 'onsite');
+
+  const filtered = await jsonReq(base, '/api/cvs?status=active&tag=engineering&folder_id=onsite');
+  assert.equal(filtered.status, 200);
+  assert.equal(filtered.body.data.length, 1);
+
+  const untagged = await jsonReq(base, `/api/cvs/${id}/tags/engineering`, { method: 'DELETE' });
+  assert.equal(untagged.status, 200);
+  assert.equal(untagged.body.data.tags.length, 0);
+
+  server.close();
+});
+
+test('Import/export JSON: exports payload and imports as tagged copy', async () => {
+  const server = createAppServer();
+  server.listen(0);
+  await once(server, 'listening');
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+
+  const created = await jsonReq(base, '/api/cvs', { method: 'POST', body: { title: 'Original CV', content_json: { summary: 'hello' } } });
+  const id = created.body.data.id;
+  const exported = await jsonReq(base, `/api/cvs/${id}/export/json`);
+  assert.equal(exported.status, 200);
+  assert.equal(exported.body.data.export_version, '1.0');
+  assert.equal(exported.body.data.cv.title, 'Original CV');
+
+  const imported = await jsonReq(base, '/api/cvs/import/json', { method: 'POST', body: exported.body.data });
+  assert.equal(imported.status, 201);
+  assert.notEqual(imported.body.data.id, id);
+  assert.equal(imported.body.data.sourceMetadata.source, 'json_import');
+
+  const badImport = await jsonReq(base, '/api/cvs/import/json', { method: 'POST', body: { nope: true } });
+  assert.equal(badImport.status, 400);
+  assert.equal(badImport.body.error, 'Import failed');
+
+  server.close();
+});
+
+test('CV detail and render-ready endpoint: stable sections and version selection', async () => {
+  const server = createAppServer();
+  server.listen(0);
+  await once(server, 'listening');
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+
+  const created = await jsonReq(base, '/api/cvs', {
+    method: 'POST',
+    body: { title: 'Structured CV', content_json: { summary: 'Senior engineer', experience: [{ text: 'Built APIs' }] } }
+  });
+  assert.equal(created.status, 201);
+  const id = created.body.data.id;
+  const revision = created.body.data.updatedAt;
+
+  assert.ok(Array.isArray(created.body.data.content_json.skills));
+  assert.ok(Array.isArray(created.body.data.content_json.education));
+  assert.equal(created.body.data.content_json.summary, 'Senior engineer');
+
+  const saved = await jsonReq(base, `/api/cvs/${id}`, {
+    method: 'PUT',
+    body: { content_json: { summary: 'Principal engineer', skills: ['Node.js'] }, updated_at: revision, save_reason: 'manual_save' }
+  });
+  assert.equal(saved.status, 200);
+
+  const snapshots = await jsonReq(base, `/api/cvs/${id}/snapshots`);
+  assert.equal(snapshots.status, 200);
+  assert.ok(snapshots.body.data.length > 0);
+  const snapshotId = snapshots.body.data[0].id;
+
+  const renderCurrent = await jsonReq(base, `/api/cvs/${id}/render-ready-text?version=current`);
+  assert.equal(renderCurrent.status, 200);
+  assert.equal(renderCurrent.body.data.cv_id, id);
+  assert.ok(renderCurrent.body.data.section_order.includes('summary'));
+  assert.ok(renderCurrent.body.data.section_order.includes('experience'));
+  assert.ok(typeof renderCurrent.body.data.render_ready_text === 'string');
+
+  const renderSnapshot = await jsonReq(base, `/api/cvs/${id}/render-ready-text?version=${snapshotId}`);
+  assert.equal(renderSnapshot.status, 200);
+  assert.equal(renderSnapshot.body.data.version_id, snapshotId);
+
+  const notFoundVersion = await jsonReq(base, `/api/cvs/${id}/render-ready-text?version=missing-snapshot`);
+  assert.equal(notFoundVersion.status, 404);
+
+  server.close();
+});
+
+test('Analytics: tracks lifecycle events, save failures, dashboard panels, and alert thresholds', async () => {
+  const server = createAppServer();
+  server.listen(0);
+  await once(server, 'listening');
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+
+  const created = await jsonReq(base, '/api/cvs', { method: 'POST', body: { title: 'Analytics CV' } });
+  const cvId = created.body.data.id;
+  const opened = await jsonReq(base, `/api/cvs/${cvId}`);
+  assert.equal(opened.status, 200);
+
+  const saved = await jsonReq(base, `/api/cvs/${cvId}`, { method: 'PUT', body: { title: 'Analytics CV v2', updated_at: opened.body.data.updatedAt } });
+  assert.equal(saved.status, 200);
+
+  const conflict = await jsonReq(base, `/api/cvs/${cvId}`, { method: 'PUT', body: { title: 'stale', updated_at: opened.body.data.updatedAt } });
+  assert.equal(conflict.status, 409);
+
+  const duplicated = await jsonReq(base, `/api/cvs/${cvId}/duplicate`, { method: 'POST', body: {} });
+  assert.equal(duplicated.status, 201);
+
+  const restored = await jsonReq(base, `/api/cvs/${cvId}/restore`, { method: 'POST' });
+  assert.equal(restored.status, 200);
+
+  const taxBad = await jsonReq(base, '/api/analytics/events', { method: 'POST', body: { event_name: 'cv_save' } });
+  assert.equal(taxBad.status, 400);
+
+  const taxGood = await jsonReq(base, '/api/analytics/events', { method: 'POST', body: { event_name: 'cv_saved', status: 'failure', error_code: 'SAVE_TIMEOUT', cv_id: cvId } });
+  assert.equal(taxGood.status, 202);
+
+  const dashboard = await jsonReq(base, '/api/analytics/dashboard');
+  assert.equal(dashboard.status, 200);
+  assert.equal(dashboard.body.data.panels.length, 3);
+  assert.ok(dashboard.body.data.panels.some((panel) => panel.id === 'save_success_rate'));
+  assert.ok(dashboard.body.data.panels.some((panel) => panel.id === 'duplicate_success_rate'));
+  assert.ok(dashboard.body.data.panels.some((panel) => panel.id === 'weekly_return_to_edit'));
+  assert.ok(dashboard.body.data.alerts.some((alert) => alert.id === 'save_failure_rate_elevated' && alert.threshold === 0.05));
+
+  server.close();
+});

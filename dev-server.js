@@ -23,6 +23,10 @@ const MAX_COMPANY_LENGTH = 140;
 const MAX_ROLE_LENGTH = 140;
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
+const MAX_TAG_LENGTH = 60;
+const MAX_FOLDER_LENGTH = 80;
+const EXPORT_VERSION = '1.0';
+const STABLE_CV_SECTIONS = ['summary', 'skills', 'experience', 'education', 'projects', 'certifications', 'awards', 'publications', 'volunteering', 'languages', 'interests'];
 
 const cvs = [];
 let nextId = 1;
@@ -31,6 +35,8 @@ const snapshots = [];
 let nextSnapshotId = 1;
 const AUTOSAVE_SNAPSHOT_INTERVAL = 5;
 const SNAPSHOT_RETENTION_LIMIT = 20;
+const analyticsEvents = [];
+const dashboardAlerts = [{ id: 'save_failure_rate_elevated', metric: 'save_failure_rate', threshold: 0.05, window: '15m', severity: 'warning', enabled: true }];
 
 const sendJson = (res, status, body) => {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -76,8 +82,42 @@ const toDto = (cv) => ({
   createdAt: cv.createdAt,
   updatedAt: cv.updatedAt,
   revision: cv.updatedAt,
-  lastOpenedAt: cv.lastOpenedAt
+  lastOpenedAt: cv.lastOpenedAt,
+  folderId: cv.folderId,
+  tags: cv.tags,
+  sourceMetadata: cv.sourceMetadata || null
 });
+
+const buildCvExportPayload = (cv) => ({
+  export_version: EXPORT_VERSION,
+  exported_at: new Date().toISOString(),
+  cv: {
+    title: cv.title,
+    targetRole: cv.targetRole,
+    targetCompany: cv.targetCompany,
+    content_json: cv.contentJson,
+    content_text: cv.contentText,
+    folder_id: cv.folderId,
+    tags: cv.tags
+  }
+});
+
+const validateImportedCv = (payload) => {
+  if (!isPlainObject(payload)) return { error: 'Import payload must be a JSON object.' };
+  if (payload.export_version !== EXPORT_VERSION) return { error: `Unsupported export_version. Expected ${EXPORT_VERSION}.` };
+  if (!isPlainObject(payload.cv)) return { error: 'Import payload must include a cv object.' };
+  const cvPayload = {
+    ...payload.cv,
+    targetRole: payload.cv.targetRole ?? undefined,
+    targetCompany: payload.cv.targetCompany ?? undefined
+  };
+  const err = validatePayload(cvPayload, { requireTitle: true });
+  if (err) return { error: `Invalid cv data: ${err}` };
+  if (payload.cv.tags !== undefined && (!Array.isArray(payload.cv.tags) || payload.cv.tags.some((tag) => typeof tag !== 'string' || !tag.trim()))) {
+    return { error: 'Invalid cv data: tags must be a non-empty string array when provided.' };
+  }
+  return { cv: payload.cv };
+};
 
 const isPlainObject = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
 
@@ -129,6 +169,9 @@ const validatePayload = (payload, { requireTitle = false } = {}) => {
   if (payload.create_pre_restore !== undefined && typeof payload.create_pre_restore !== 'boolean') {
     return 'create_pre_restore must be a boolean';
   }
+  if (payload.folder_id !== undefined && payload.folder_id !== null && (typeof payload.folder_id !== 'string' || payload.folder_id.length > MAX_FOLDER_LENGTH)) {
+    return `folder_id must be a string <= ${MAX_FOLDER_LENGTH} chars or null`;
+  }
 
   return null;
 };
@@ -139,7 +182,17 @@ const parsePagination = (url) => {
   const pageParam = url.searchParams.get('page');
   const page = pageParam ? Math.max(1, Number(pageParam) || 1) : 1;
   const status = (url.searchParams.get('status') || 'active').toLowerCase();
-  return { limit, cursor, page, status };
+  const folderId = url.searchParams.get('folder_id');
+  const tag = url.searchParams.get('tag');
+  const sort = (url.searchParams.get('sort') || 'recent').toLowerCase();
+  return { limit, cursor, page, status, folderId, tag, sort };
+};
+
+
+const sortCvs = (rows, sort) => {
+  if (sort === 'title') return [...rows].sort((a, b) => a.title.localeCompare(b.title));
+  if (sort === 'company') return [...rows].sort((a, b) => (a.targetCompany || '').localeCompare(b.targetCompany || ''));
+  return [...rows].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 };
 
 const writeSnapshot = ({ cv, reason }) => {
@@ -175,6 +228,93 @@ const writeSnapshot = ({ cv, reason }) => {
   }
 };
 
+
+
+const flattenText = (value) => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return value.map(flattenText).join('\n').trim();
+  if (isPlainObject(value)) {
+    if (typeof value.text === 'string') return value.text;
+    if (typeof value.html === 'string') return value.html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    return Object.values(value).map(flattenText).filter(Boolean).join('\n').trim();
+  }
+  return '';
+};
+
+const normalizeContentBySection = (contentJson) => {
+  if (!isPlainObject(contentJson)) return { General: flattenText(contentJson) };
+  const out = {};
+  for (const [key, value] of Object.entries(contentJson)) {
+    const normalized = flattenText(value);
+    if (normalized) out[key] = normalized;
+  }
+  return Object.keys(out).length ? out : { General: '' };
+};
+
+const normalizeStableContentJson = (contentJson) => {
+  const source = isPlainObject(contentJson) ? contentJson : {};
+  const normalized = {};
+  for (const section of STABLE_CV_SECTIONS) {
+    const value = source[section];
+    if (value === undefined) normalized[section] = [];
+    else normalized[section] = value;
+  }
+  for (const [key, value] of Object.entries(source)) {
+    if (!(key in normalized)) normalized[key] = value;
+  }
+  return normalized;
+};
+
+const buildRenderReadyTextPayload = (cv, userId, versionId = 'current') => {
+  const selectedContent = resolveVersion(cv, userId, versionId);
+  if (!selectedContent) return null;
+  const content_json = normalizeStableContentJson(selectedContent);
+  const by_section = normalizeContentBySection(content_json);
+  const section_order = [...STABLE_CV_SECTIONS, ...Object.keys(by_section).filter((key) => !STABLE_CV_SECTIONS.includes(key))];
+  const blocks = section_order
+    .map((sectionKey) => ({
+      section: sectionKey,
+      text: by_section[sectionKey] || flattenText(content_json[sectionKey])
+    }))
+    .filter((block) => block.text && block.text.trim().length > 0);
+  return {
+    cv_id: cv.id,
+    version_id: versionId,
+    title: cv.title,
+    target_role: cv.targetRole,
+    target_company: cv.targetCompany,
+    section_order,
+    text_blocks: blocks,
+    render_ready_text: blocks.map((block) => `${block.section.toUpperCase()}\n${block.text}`).join('\n\n')
+  };
+};
+
+const resolveVersion = (cv, userId, versionId) => {
+  if (!versionId || versionId === 'current') return cv.contentJson;
+  const snapshot = snapshots.find((row) => row.id === versionId && row.cvId === cv.id && row.userId === userId);
+  if (!snapshot) return null;
+  return snapshot.contentJson;
+};
+const trackEvent = ({ eventName, userId, cvId = null, status = 'success', errorCode = null, meta = {} }) => {
+  analyticsEvents.push({ eventName, userId, cvId, status, errorCode, meta, occurredAt: new Date().toISOString() });
+};
+const normalizeAnalyticsEventName = (value) => (new Set(['cv_created', 'cv_saved', 'cv_duplicated', 'cv_opened', 'cv_restored']).has(value) ? value : null);
+const toDashboardPanels = (userId) => {
+  const rows = analyticsEvents.filter((row) => row.userId === userId);
+  const count = (name, status) => rows.filter((row) => row.eventName === name && (!status || row.status === status)).length;
+  const saveSuccess = count('cv_saved', 'success');
+  const saveFail = count('cv_saved', 'failure');
+  const dupSuccess = count('cv_duplicated', 'success');
+  const dupFail = count('cv_duplicated', 'failure');
+  const weeklyReturn = rows.filter((row) => row.eventName === 'cv_opened' && row.status === 'success').length;
+  return [
+    { id: 'save_success_rate', title: 'Save Success Rate', value: saveSuccess + saveFail ? saveSuccess / (saveSuccess + saveFail) : 1 },
+    { id: 'duplicate_success_rate', title: 'Duplicate Success', value: dupSuccess + dupFail ? dupSuccess / (dupSuccess + dupFail) : 1 },
+    { id: 'weekly_return_to_edit', title: 'Weekly Return-to-Edit', value: weeklyReturn }
+  ];
+};
 export const requestHandler = async (req, res) => {
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
@@ -182,6 +322,18 @@ export const requestHandler = async (req, res) => {
     const method = req.method || 'GET';
 
     const userId = getAuthUserId(req);
+    if (pathname.startsWith('/api/analytics')) {
+      if (!userId) return sendJson(res, 401, { error: 'Unauthorized' });
+      if (method === 'POST' && pathname === '/api/analytics/events') {
+        const payload = await readJsonBody(req);
+        const eventName = normalizeAnalyticsEventName(payload?.event_name);
+        if (!eventName) return sendJson(res, 400, { error: 'Unsupported event_name' });
+        trackEvent({ eventName, userId, cvId: payload?.cv_id ? String(payload.cv_id) : null, status: payload?.status === 'failure' ? 'failure' : 'success', errorCode: payload?.error_code || null, meta: isPlainObject(payload?.meta) ? payload.meta : {} });
+        return sendJson(res, 202, { ok: true });
+      }
+      if (method === 'GET' && pathname === '/api/analytics/dashboard') return sendJson(res, 200, { data: { panels: toDashboardPanels(userId), alerts: dashboardAlerts } });
+      return sendJson(res, 404, { error: 'Not found' });
+    }
 
     if (pathname.startsWith('/api/cvs')) {
       if (!userId) {
@@ -199,7 +351,7 @@ export const requestHandler = async (req, res) => {
           title: payload.title.trim(),
           targetRole: payload.targetRole || null,
           targetCompany: payload.targetCompany || null,
-          contentJson: payload.content_json ?? {},
+          contentJson: normalizeStableContentJson(payload.content_json ?? {}),
           contentText: payload.content_text ?? null,
           status: 'active',
           createdAt: now,
@@ -207,30 +359,35 @@ export const requestHandler = async (req, res) => {
           lastOpenedAt: now,
           deletedAt: null,
           archivedAt: null,
-          saveCount: 0
+          saveCount: 0,
+          folderId: payload.folder_id ?? 'inbox',
+          tags: []
         };
         cvs.push(cv);
+        trackEvent({ eventName: 'cv_created', userId, cvId: cv.id, status: 'success' });
         return sendJson(res, 201, { data: toDto(cv) });
       }
 
       if (method === 'GET' && pathname === '/api/cvs') {
-        const { limit, cursor, page, status } = parsePagination(url);
+        const { limit, cursor, page, status, folderId, tag, sort } = parsePagination(url);
         const allowedStatuses = new Set(['active', 'archived', 'deleted']);
         const requestedStatus = allowedStatuses.has(status) ? status : 'active';
         const owned = cvs
           .filter((cv) => cv.userId === userId && cv.status === requestedStatus)
-          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+          .filter((cv) => (!folderId ? true : cv.folderId === folderId))
+          .filter((cv) => (!tag ? true : cv.tags.includes(tag)));
+        const sortedOwned = sortCvs(owned, sort);
         let startIndex = 0;
         if (cursor) {
-          const idx = owned.findIndex((cv) => cv.id === cursor);
+          const idx = sortedOwned.findIndex((cv) => cv.id === cursor);
           startIndex = idx >= 0 ? idx + 1 : 0;
         } else if (page > 1) {
           startIndex = (page - 1) * limit;
         }
 
-        const data = owned.slice(startIndex, startIndex + limit).map(toDto);
+        const data = sortedOwned.slice(startIndex, startIndex + limit).map(toDto);
         const nextCursor = data.length === limit ? data[data.length - 1].id : null;
-        return sendJson(res, 200, { data, pagination: { limit, nextCursor, page } });
+        return sendJson(res, 200, { data, pagination: { limit, nextCursor, page, sort } });
       }
 
       const idMatch = pathname.match(/^\/api\/cvs\/([^/]+)$/);
@@ -238,6 +395,7 @@ export const requestHandler = async (req, res) => {
         const cv = cvs.find((row) => row.id === idMatch[1] && row.userId === userId && !row.deletedAt);
         if (!cv) return sendJson(res, 404, { error: 'Not found' });
         cv.lastOpenedAt = new Date().toISOString();
+        trackEvent({ eventName: 'cv_opened', userId, cvId: cv.id, status: 'success' });
         return sendJson(res, 200, { data: toDto(cv) });
       }
 
@@ -246,12 +404,17 @@ export const requestHandler = async (req, res) => {
         if (!cv) return sendJson(res, 404, { error: 'Not found' });
         const payload = await readJsonBody(req);
         const err = validatePayload(payload, { requireTitle: false });
-        if (err) return sendJson(res, 400, { error: err });
+        if (err) {
+          trackEvent({ eventName: 'cv_saved', userId, cvId: cv.id, status: 'failure', errorCode: 'VALIDATION_ERROR' });
+          return sendJson(res, 400, { error: err });
+        }
         const clientRevision = payload.updated_at ?? payload.revision;
         if (!clientRevision) {
+          trackEvent({ eventName: 'cv_saved', userId, cvId: cv.id, status: 'failure', errorCode: 'MISSING_REVISION' });
           return sendJson(res, 400, { error: 'updated_at (or revision) is required' });
         }
         if (clientRevision !== cv.updatedAt) {
+          trackEvent({ eventName: 'cv_saved', userId, cvId: cv.id, status: 'failure', errorCode: 'CV_CONFLICT' });
           return sendJson(res, 409, {
             error: 'Conflict',
             code: 'CV_CONFLICT',
@@ -267,8 +430,9 @@ export const requestHandler = async (req, res) => {
         if (payload.title !== undefined) cv.title = payload.title.trim();
         if (payload.targetRole !== undefined) cv.targetRole = payload.targetRole;
         if (payload.targetCompany !== undefined) cv.targetCompany = payload.targetCompany;
-        if (payload.content_json !== undefined) cv.contentJson = payload.content_json;
+        if (payload.content_json !== undefined) cv.contentJson = normalizeStableContentJson(payload.content_json);
         if (payload.content_text !== undefined) cv.contentText = payload.content_text;
+        if (payload.folder_id !== undefined) cv.folderId = payload.folder_id ?? 'inbox';
         cv.saveCount = (cv.saveCount || 0) + 1;
         cv.updatedAt = new Date().toISOString();
 
@@ -279,6 +443,7 @@ export const requestHandler = async (req, res) => {
           writeSnapshot({ cv, reason: 'autosave_checkpoint' });
         }
 
+        trackEvent({ eventName: 'cv_saved', userId, cvId: cv.id, status: 'success', meta: { saveReason } });
         return sendJson(res, 200, { data: toDto(cv) });
       }
 
@@ -309,7 +474,7 @@ export const requestHandler = async (req, res) => {
           title: payload.title !== undefined ? payload.title.trim() : source.title,
           targetRole: payload.targetRole !== undefined ? payload.targetRole : source.targetRole,
           targetCompany: payload.targetCompany !== undefined ? payload.targetCompany : source.targetCompany,
-          contentJson: source.contentJson,
+          contentJson: normalizeStableContentJson(source.contentJson),
           contentText: source.contentText,
           status: 'active',
           createdAt: now,
@@ -317,11 +482,80 @@ export const requestHandler = async (req, res) => {
           lastOpenedAt: now,
           deletedAt: null,
           archivedAt: null,
-          saveCount: 0
+          saveCount: 0,
+          folderId: source.folderId || 'inbox',
+          tags: [...(source.tags || [])]
         };
         cvs.push(duplicated);
         duplicateGuards.set(guardKey, { cvId: duplicated.id, createdAtMs: nowMs });
+        trackEvent({ eventName: 'cv_duplicated', userId, cvId: duplicated.id, status: 'success', meta: { sourceCvId: sourceId } });
         return sendJson(res, 201, { data: toDto(duplicated) });
+      }
+
+      const exportJsonMatch = pathname.match(/^\/api\/cvs\/([^/]+)\/export\/json$/);
+      if (exportJsonMatch && method === 'GET') {
+        const cv = cvs.find((row) => row.id === exportJsonMatch[1] && row.userId === userId && !row.deletedAt);
+        if (!cv) return sendJson(res, 404, { error: 'Not found' });
+        return sendJson(res, 200, { data: buildCvExportPayload(cv) });
+      }
+
+      const importJsonMatch = pathname === '/api/cvs/import/json';
+      if (importJsonMatch && method === 'POST') {
+        const payload = await readJsonBody(req);
+        const parsed = validateImportedCv(payload);
+        if (parsed.error) {
+          return sendJson(res, 400, {
+            error: 'Import failed',
+            message: parsed.error,
+            guidance: 'Re-export your CV and import the unmodified JSON payload.'
+          });
+        }
+        const now = new Date().toISOString();
+        const imported = {
+          id: String(nextId++),
+          userId,
+          title: parsed.cv.title.trim(),
+          targetRole: parsed.cv.targetRole || null,
+          targetCompany: parsed.cv.targetCompany || null,
+          contentJson: normalizeStableContentJson(parsed.cv.content_json ?? {}),
+          contentText: parsed.cv.content_text ?? null,
+          status: 'active',
+          createdAt: now,
+          updatedAt: now,
+          lastOpenedAt: now,
+          deletedAt: null,
+          archivedAt: null,
+          saveCount: 0,
+          folderId: parsed.cv.folder_id ?? 'inbox',
+          tags: Array.isArray(parsed.cv.tags) ? parsed.cv.tags : [],
+          sourceMetadata: {
+            source: 'json_import',
+            importedAt: now,
+            exportVersion: payload.export_version,
+            exportedAt: payload.exported_at || null
+          }
+        };
+        cvs.push(imported);
+        return sendJson(res, 201, { data: toDto(imported) });
+      }
+
+      const bulkMatch = pathname.match(/^\/api\/cvs\/bulk\/(archive|delete|restore)$/);
+      if (bulkMatch && method === 'POST') {
+        const action = bulkMatch[1];
+        const payload = await readJsonBody(req);
+        const ids = Array.isArray(payload?.ids) ? payload.ids.map((id) => String(id)) : [];
+        if (!ids.length) return sendJson(res, 400, { error: 'ids is required' });
+        const uniqueIds = Array.from(new Set(ids));
+        const targets = uniqueIds.map((id) => cvs.find((row) => row.id === id && row.userId === userId));
+        if (targets.some((row) => !row)) return sendJson(res, 404, { error: 'One or more CVs not found' });
+        const now = new Date().toISOString();
+        for (const cv of targets) {
+          if (action === 'archive') { cv.status = 'archived'; cv.archivedAt = now; }
+          else if (action === 'delete') { cv.status = 'deleted'; cv.deletedAt = now; }
+          else { cv.status = 'active'; cv.deletedAt = null; cv.archivedAt = null; }
+          cv.updatedAt = now;
+        }
+        return sendJson(res, 200, { data: targets.map(toDto), count: targets.length });
       }
 
       const actionMatch = pathname.match(/^\/api\/cvs\/([^/]+)\/(archive|delete|restore)$/);
@@ -344,6 +578,7 @@ export const requestHandler = async (req, res) => {
         }
 
         cv.updatedAt = now;
+        if (action === 'restore') trackEvent({ eventName: 'cv_restored', userId, cvId: cv.id, status: 'success' });
         return sendJson(res, 200, { data: toDto(cv) });
       }
 
@@ -356,6 +591,59 @@ export const requestHandler = async (req, res) => {
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
           .map((row) => ({ id: row.id, createdAt: row.createdAt, reason: row.reason }));
         return sendJson(res, 200, { data });
+      }
+
+
+      const compareMatch = pathname.match(/^\/api\/cvs\/([^/]+)\/compare$/);
+      if (compareMatch && method === 'GET') {
+        const cv = cvs.find((row) => row.id === compareMatch[1] && row.userId === userId);
+        if (!cv) return sendJson(res, 404, { error: 'Not found' });
+        const leftId = url.searchParams.get('left') || 'current';
+        const rightId = url.searchParams.get('right') || 'current';
+        const leftVersion = resolveVersion(cv, userId, leftId);
+        const rightVersion = resolveVersion(cv, userId, rightId);
+        if (!leftVersion || !rightVersion) return sendJson(res, 404, { error: 'Version not found' });
+        const left = normalizeContentBySection(leftVersion);
+        const right = normalizeContentBySection(rightVersion);
+        const sections = Array.from(new Set([...Object.keys(left), ...Object.keys(right)])).sort();
+        return sendJson(res, 200, { data: { leftId, rightId, sections, normalized: { left, right } } });
+      }
+
+      const renderReadyMatch = pathname.match(/^\/api\/cvs\/([^/]+)\/render-ready-text$/);
+      if (renderReadyMatch && method === 'GET') {
+        const cv = cvs.find((row) => row.id === renderReadyMatch[1] && row.userId === userId);
+        if (!cv) return sendJson(res, 404, { error: 'Not found' });
+        const versionId = url.searchParams.get('version') || 'current';
+        const payload = buildRenderReadyTextPayload(cv, userId, versionId);
+        if (!payload) return sendJson(res, 404, { error: 'Version not found' });
+        return sendJson(res, 200, { data: payload });
+      }
+
+      const tagsMatch = pathname.match(/^\/api\/cvs\/([^/]+)\/tags\/([^/]+)$/);
+      if (tagsMatch && (method === 'PUT' || method === 'DELETE')) {
+        const [, cvId, rawTag] = tagsMatch;
+        const cv = cvs.find((row) => row.id === cvId && row.userId === userId && !row.deletedAt);
+        if (!cv) return sendJson(res, 404, { error: 'Not found' });
+        const tag = decodeURIComponent(rawTag).trim().toLowerCase();
+        if (!tag || tag.length > MAX_TAG_LENGTH) return sendJson(res, 400, { error: `tag must be 1-${MAX_TAG_LENGTH} chars` });
+        cv.tags = Array.isArray(cv.tags) ? cv.tags : [];
+        if (method === 'PUT' && !cv.tags.includes(tag)) cv.tags.push(tag);
+        if (method === 'DELETE') cv.tags = cv.tags.filter((value) => value !== tag);
+        cv.updatedAt = new Date().toISOString();
+        return sendJson(res, 200, { data: toDto(cv) });
+      }
+
+      const moveMatch = pathname.match(/^\/api\/cvs\/([^/]+)\/move$/);
+      if (moveMatch && method === 'POST') {
+        const cv = cvs.find((row) => row.id === moveMatch[1] && row.userId === userId && !row.deletedAt);
+        if (!cv) return sendJson(res, 404, { error: 'Not found' });
+        const payload = await readJsonBody(req);
+        if (payload.folder_id !== null && (typeof payload.folder_id !== 'string' || payload.folder_id.trim() === '' || payload.folder_id.length > MAX_FOLDER_LENGTH)) {
+          return sendJson(res, 400, { error: `folder_id must be a non-empty string <= ${MAX_FOLDER_LENGTH} chars or null` });
+        }
+        cv.folderId = payload.folder_id ?? 'inbox';
+        cv.updatedAt = new Date().toISOString();
+        return sendJson(res, 200, { data: toDto(cv) });
       }
 
       const restoreSnapshotMatch = pathname.match(/^\/api\/cvs\/([^/]+)\/restore-snapshot\/([^/]+)$/);

@@ -26,3 +26,10 @@
 .conflict-modal h3{margin:.2rem 0 .4rem}
 .conflict-modal p{margin:0;color:var(--muted)}
 .conflict-actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem}
+.compare-grid{margin-top:1rem;display:grid;gap:.8rem}
+.compare-row{background:#fff;border:1px solid var(--border);border-radius:12px;padding:.75rem}
+.compare-cols{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}
+.compare-cols pre{white-space:pre-wrap;background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:.5rem;min-height:90px}
+.bulk-row{display:flex;align-items:center;gap:.5rem;margin:.5rem 0 1rem;flex-wrap:wrap}
+.row-check{display:flex;align-items:center}
+.pagination-row{display:flex;align-items:center;justify-content:flex-end;gap:.6rem;margin-top:.8rem}
