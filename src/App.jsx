@@ -119,7 +119,7 @@ function App() {
 
   useEffect(() => { loadCv(); }, [loadCv]);
 
-  const saveCv = useCallback(async () => {
+  const saveCv = useCallback(async (saveReason = 'autosave') => {
     if (!cvId || !cvRef.current) return;
     const html = cvRef.current.innerHTML;
     setSaveState('Saving…');
@@ -134,7 +134,8 @@ function App() {
         body: JSON.stringify({
           content_json: { html },
           content_text: cvRef.current.innerText,
-          updated_at: currentRevision
+          updated_at: currentRevision,
+          save_reason: saveReason
         })
       });
       const payload = await res.json();
@@ -167,7 +168,7 @@ function App() {
 
   useEffect(() => {
     if (!hasUnsavedChanges) return undefined;
-    const handle = window.setTimeout(() => { saveCv(); }, AUTOSAVE_DELAY_MS);
+    const handle = window.setTimeout(() => { saveCv('autosave'); }, AUTOSAVE_DELAY_MS);
     return () => window.clearTimeout(handle);
   }, [hasUnsavedChanges, saveCv]);
 
@@ -197,7 +198,7 @@ function App() {
         <button type="button" className={route === 'editor' ? 'active' : ''} onClick={() => handleNavigate('editor')}>Editor</button>
         <button type="button" className={route === 'my-cvs' ? 'active' : ''} onClick={() => handleNavigate('my-cvs')}>My CVs</button>
       </header>
-      {route === 'my-cvs' ? <CvListPage /> : <section className="cv-shell"><button type="button" className="save-pdf-button" onClick={handleSaveAsPdf} aria-label="Save as PDF" title="Save as PDF"><MdOutlineSaveAs className="save-pdf-icon" /></button><div className="editor-toolbar"><button type="button" className="secondary-btn" onClick={saveCv} disabled={!cvId}>Save</button><small>{saveState}</small></div>{editorError && <p className="error-text">{editorError}</p>}<article ref={cvRef} className="cv-document" contentEditable suppressContentEditableWarning><h2>CV Editor</h2><p>Edit your CV content here.</p></article>{showConflictModal && <div className="conflict-backdrop" role="dialog" aria-modal="true" aria-labelledby="conflict-title"><div className="conflict-modal"><h3 id="conflict-title">This CV changed elsewhere. Reload latest version.</h3><p>Reload to continue editing with the newest content.</p><div className="conflict-actions"><button type="button" className="primary-btn" onClick={() => { setShowConflictModal(false); loadCv(); }}>Reload latest version</button><button type="button" className="secondary-btn" onClick={() => setShowConflictModal(false)}>Close</button></div></div></div>}</section>}
+      {route === 'my-cvs' ? <CvListPage /> : <section className="cv-shell"><button type="button" className="save-pdf-button" onClick={handleSaveAsPdf} aria-label="Save as PDF" title="Save as PDF"><MdOutlineSaveAs className="save-pdf-icon" /></button><div className="editor-toolbar"><button type="button" className="secondary-btn" onClick={() => saveCv('manual_save')} disabled={!cvId}>Save</button><small>{saveState}</small></div>{editorError && <p className="error-text">{editorError}</p>}<article ref={cvRef} className="cv-document" contentEditable suppressContentEditableWarning><h2>CV Editor</h2><p>Edit your CV content here.</p></article>{showConflictModal && <div className="conflict-backdrop" role="dialog" aria-modal="true" aria-labelledby="conflict-title"><div className="conflict-modal"><h3 id="conflict-title">This CV changed elsewhere. Reload latest version.</h3><p>Reload to continue editing with the newest content.</p><div className="conflict-actions"><button type="button" className="primary-btn" onClick={() => { setShowConflictModal(false); loadCv(); }}>Reload latest version</button><button type="button" className="secondary-btn" onClick={() => setShowConflictModal(false)}>Close</button></div></div></div>}</section>}
     </main>
   );
 }
