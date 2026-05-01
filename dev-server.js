@@ -23,6 +23,8 @@ const MAX_COMPANY_LENGTH = 140;
 const MAX_ROLE_LENGTH = 140;
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
+const MAX_TAG_LENGTH = 60;
+const MAX_FOLDER_LENGTH = 80;
 
 const cvs = [];
 let nextId = 1;
@@ -76,7 +78,9 @@ const toDto = (cv) => ({
   createdAt: cv.createdAt,
   updatedAt: cv.updatedAt,
   revision: cv.updatedAt,
-  lastOpenedAt: cv.lastOpenedAt
+  lastOpenedAt: cv.lastOpenedAt,
+  folderId: cv.folderId,
+  tags: cv.tags
 });
 
 const isPlainObject = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
@@ -129,6 +133,9 @@ const validatePayload = (payload, { requireTitle = false } = {}) => {
   if (payload.create_pre_restore !== undefined && typeof payload.create_pre_restore !== 'boolean') {
     return 'create_pre_restore must be a boolean';
   }
+  if (payload.folder_id !== undefined && payload.folder_id !== null && (typeof payload.folder_id !== 'string' || payload.folder_id.length > MAX_FOLDER_LENGTH)) {
+    return `folder_id must be a string <= ${MAX_FOLDER_LENGTH} chars or null`;
+  }
 
   return null;
 };
@@ -139,7 +146,9 @@ const parsePagination = (url) => {
   const pageParam = url.searchParams.get('page');
   const page = pageParam ? Math.max(1, Number(pageParam) || 1) : 1;
   const status = (url.searchParams.get('status') || 'active').toLowerCase();
-  return { limit, cursor, page, status };
+  const folderId = url.searchParams.get('folder_id');
+  const tag = url.searchParams.get('tag');
+  return { limit, cursor, page, status, folderId, tag };
 };
 
 const writeSnapshot = ({ cv, reason }) => {
@@ -207,18 +216,22 @@ export const requestHandler = async (req, res) => {
           lastOpenedAt: now,
           deletedAt: null,
           archivedAt: null,
-          saveCount: 0
+          saveCount: 0,
+          folderId: payload.folder_id ?? 'inbox',
+          tags: []
         };
         cvs.push(cv);
         return sendJson(res, 201, { data: toDto(cv) });
       }
 
       if (method === 'GET' && pathname === '/api/cvs') {
-        const { limit, cursor, page, status } = parsePagination(url);
+        const { limit, cursor, page, status, folderId, tag } = parsePagination(url);
         const allowedStatuses = new Set(['active', 'archived', 'deleted']);
         const requestedStatus = allowedStatuses.has(status) ? status : 'active';
         const owned = cvs
           .filter((cv) => cv.userId === userId && cv.status === requestedStatus)
+          .filter((cv) => (!folderId ? true : cv.folderId === folderId))
+          .filter((cv) => (!tag ? true : cv.tags.includes(tag)))
           .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
         let startIndex = 0;
         if (cursor) {
@@ -269,6 +282,7 @@ export const requestHandler = async (req, res) => {
         if (payload.targetCompany !== undefined) cv.targetCompany = payload.targetCompany;
         if (payload.content_json !== undefined) cv.contentJson = payload.content_json;
         if (payload.content_text !== undefined) cv.contentText = payload.content_text;
+        if (payload.folder_id !== undefined) cv.folderId = payload.folder_id ?? 'inbox';
         cv.saveCount = (cv.saveCount || 0) + 1;
         cv.updatedAt = new Date().toISOString();
 
@@ -317,7 +331,9 @@ export const requestHandler = async (req, res) => {
           lastOpenedAt: now,
           deletedAt: null,
           archivedAt: null,
-          saveCount: 0
+          saveCount: 0,
+          folderId: source.folderId || 'inbox',
+          tags: [...(source.tags || [])]
         };
         cvs.push(duplicated);
         duplicateGuards.set(guardKey, { cvId: duplicated.id, createdAtMs: nowMs });
@@ -356,6 +372,33 @@ export const requestHandler = async (req, res) => {
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
           .map((row) => ({ id: row.id, createdAt: row.createdAt, reason: row.reason }));
         return sendJson(res, 200, { data });
+      }
+
+      const tagsMatch = pathname.match(/^\/api\/cvs\/([^/]+)\/tags\/([^/]+)$/);
+      if (tagsMatch && (method === 'PUT' || method === 'DELETE')) {
+        const [, cvId, rawTag] = tagsMatch;
+        const cv = cvs.find((row) => row.id === cvId && row.userId === userId && !row.deletedAt);
+        if (!cv) return sendJson(res, 404, { error: 'Not found' });
+        const tag = decodeURIComponent(rawTag).trim().toLowerCase();
+        if (!tag || tag.length > MAX_TAG_LENGTH) return sendJson(res, 400, { error: `tag must be 1-${MAX_TAG_LENGTH} chars` });
+        cv.tags = Array.isArray(cv.tags) ? cv.tags : [];
+        if (method === 'PUT' && !cv.tags.includes(tag)) cv.tags.push(tag);
+        if (method === 'DELETE') cv.tags = cv.tags.filter((value) => value !== tag);
+        cv.updatedAt = new Date().toISOString();
+        return sendJson(res, 200, { data: toDto(cv) });
+      }
+
+      const moveMatch = pathname.match(/^\/api\/cvs\/([^/]+)\/move$/);
+      if (moveMatch && method === 'POST') {
+        const cv = cvs.find((row) => row.id === moveMatch[1] && row.userId === userId && !row.deletedAt);
+        if (!cv) return sendJson(res, 404, { error: 'Not found' });
+        const payload = await readJsonBody(req);
+        if (payload.folder_id !== null && (typeof payload.folder_id !== 'string' || payload.folder_id.trim() === '' || payload.folder_id.length > MAX_FOLDER_LENGTH)) {
+          return sendJson(res, 400, { error: `folder_id must be a non-empty string <= ${MAX_FOLDER_LENGTH} chars or null` });
+        }
+        cv.folderId = payload.folder_id ?? 'inbox';
+        cv.updatedAt = new Date().toISOString();
+        return sendJson(res, 200, { data: toDto(cv) });
       }
 
       const restoreSnapshotMatch = pathname.match(/^\/api\/cvs\/([^/]+)\/restore-snapshot\/([^/]+)$/);

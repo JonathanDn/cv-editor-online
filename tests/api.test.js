@@ -164,3 +164,34 @@ test('Snapshots: creation and retention limit enforcement', async () => {
 
   server.close();
 });
+
+test('Tags/folders: assign, unassign, move, and filter', async () => {
+  const server = createAppServer();
+  server.listen(0);
+  await once(server, 'listening');
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+
+  const created = await jsonReq(base, '/api/cvs', { method: 'POST', body: { title: 'Filter CV' } });
+  assert.equal(created.status, 201);
+  const id = created.body.data.id;
+  assert.equal(created.body.data.folderId, 'inbox');
+
+  const tagged = await jsonReq(base, `/api/cvs/${id}/tags/engineering`, { method: 'PUT' });
+  assert.equal(tagged.status, 200);
+  assert.ok(tagged.body.data.tags.includes('engineering'));
+
+  const moved = await jsonReq(base, `/api/cvs/${id}/move`, { method: 'POST', body: { folder_id: 'onsite' } });
+  assert.equal(moved.status, 200);
+  assert.equal(moved.body.data.folderId, 'onsite');
+
+  const filtered = await jsonReq(base, '/api/cvs?status=active&tag=engineering&folder_id=onsite');
+  assert.equal(filtered.status, 200);
+  assert.equal(filtered.body.data.length, 1);
+
+  const untagged = await jsonReq(base, `/api/cvs/${id}/tags/engineering`, { method: 'DELETE' });
+  assert.equal(untagged.status, 200);
+  assert.equal(untagged.body.data.tags.length, 0);
+
+  server.close();
+});
