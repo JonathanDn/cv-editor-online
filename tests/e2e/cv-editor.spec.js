@@ -101,3 +101,23 @@ test('hides toolbar controls during print mode', async ({ page }) => {
   await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
   await expect(page.locator('.history-controls')).toBeVisible();
 });
+
+test('My CVs renders and duplicate action is visible', async ({ page }) => {
+  await page.getByRole('button', { name: 'My CVs' }).click();
+  await expect(page.getByRole('heading', { name: 'My CVs' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Duplicate' }).first()).toBeVisible();
+});
+
+test('editor autosave updates status indicator', async ({ page }) => {
+  await page.goto('/?id=1');
+  const doc = page.locator('.cv-document');
+  const status = page.locator('.editor-toolbar small');
+  await expect(status).toContainText('Saved');
+
+  await doc.click();
+  await page.keyboard.type('Autosave signal text');
+  await expect(status).toContainText('Saved');
+
+  await page.waitForTimeout(7600);
+  await expect(status).toContainText('Saved');
+});
