@@ -65,6 +65,16 @@ function CvListPage() {
   useEffect(() => { loadCvs(); }, [loadCvs]);
 
   const emptyMessage = useMemo(() => `No ${status} CVs yet.`, [status]);
+  const handleRestore = useCallback(async (id) => {
+    try {
+      const res = await fetch(`/api/cvs/${id}/restore`, { method: 'POST', headers: { 'x-user-id': 'u1' } });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.error || 'Could not restore CV.');
+      loadCvs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not restore CV.');
+    }
+  }, [loadCvs]);
 
   return (
     <section className="cvs-page">
@@ -75,7 +85,7 @@ function CvListPage() {
       {!isLoading && !error && rows.length === 0 && <div className="empty-state"><p>{emptyMessage}</p><button className="primary-btn" type="button">Create your first CV</button></div>}
       {!isLoading && !error && rows.length > 0 && (
         <div className="cvs-list">
-          {rows.map((cv) => <article className="cv-row" key={cv.id}><div><h3>{cv.title}</h3><p>{roleCompanyLabel(cv)}</p><small>Updated {formatUpdatedAt(cv.updatedAt)}</small></div><div className="row-actions">{['Open', 'Duplicate', 'Rename', 'Archive', 'Delete'].map((action) => <button type="button" key={action}>{action}</button>)}</div></article>)}
+          {rows.map((cv) => <article className="cv-row" key={cv.id}><div><h3>{cv.title}</h3><p>{roleCompanyLabel(cv)}</p><small>Updated {formatUpdatedAt(cv.updatedAt)}</small></div><div className="row-actions">{status === 'deleted' ? <button type="button" onClick={() => handleRestore(cv.id)}>Restore</button> : ['Open', 'Duplicate', 'Rename', 'Archive', 'Delete'].map((action) => <button type="button" key={action}>{action}</button>)}</div></article>)}
         </div>
       )}
     </section>
@@ -89,6 +99,10 @@ function App() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [editorError, setEditorError] = useState('');
   const [showConflictModal, setShowConflictModal] = useState(false);
+  const [showSnapshotsModal, setShowSnapshotsModal] = useState(false);
+  const [snapshots, setSnapshots] = useState([]);
+  const [isLoadingSnapshots, setIsLoadingSnapshots] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
   const [currentRevision, setCurrentRevision] = useState(null);
   const cvRef = useRef(null);
   const initialHtmlRef = useRef('');
@@ -191,6 +205,42 @@ function App() {
   }, [hasUnsavedChanges]);
 
   const handleSaveAsPdf = useCallback(() => { if (!cvRef.current) return; window.print(); }, []);
+  const loadSnapshots = useCallback(async () => {
+    if (!cvId) return;
+    setIsLoadingSnapshots(true);
+    setEditorError('');
+    try {
+      const res = await fetch(`/api/cvs/${cvId}/snapshots`, { headers: { 'x-user-id': 'u1' } });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.error || 'Could not load snapshots.');
+      setSnapshots(Array.isArray(payload?.data) ? payload.data : []);
+      setShowSnapshotsModal(true);
+    } catch (err) {
+      setEditorError(err instanceof Error ? err.message : 'Could not load snapshots.');
+    } finally {
+      setIsLoadingSnapshots(false);
+    }
+  }, [cvId]);
+  const restoreSnapshot = useCallback(async (snapshotId) => {
+    if (!cvId) return;
+    const shouldCreateSnapshot = window.confirm('Create a pre_restore snapshot before restoring?');
+    setEditorError('');
+    try {
+      const res = await fetch(`/api/cvs/${cvId}/restore-snapshot/${snapshotId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': 'u1' },
+        body: JSON.stringify({ create_pre_restore: shouldCreateSnapshot })
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.error || 'Could not restore snapshot.');
+      await loadCv();
+      setToastMessage('Snapshot restored successfully.');
+      setShowSnapshotsModal(false);
+      window.setTimeout(() => setToastMessage(''), 3000);
+    } catch (err) {
+      setEditorError(err instanceof Error ? err.message : 'Could not restore snapshot.');
+    }
+  }, [cvId, loadCv]);
 
   return (
     <main className="page">
@@ -198,7 +248,7 @@ function App() {
         <button type="button" className={route === 'editor' ? 'active' : ''} onClick={() => handleNavigate('editor')}>Editor</button>
         <button type="button" className={route === 'my-cvs' ? 'active' : ''} onClick={() => handleNavigate('my-cvs')}>My CVs</button>
       </header>
-      {route === 'my-cvs' ? <CvListPage /> : <section className="cv-shell"><button type="button" className="save-pdf-button" onClick={handleSaveAsPdf} aria-label="Save as PDF" title="Save as PDF"><MdOutlineSaveAs className="save-pdf-icon" /></button><div className="editor-toolbar"><button type="button" className="secondary-btn" onClick={() => saveCv('manual_save')} disabled={!cvId}>Save</button><small>{saveState}</small></div>{editorError && <p className="error-text">{editorError}</p>}<article ref={cvRef} className="cv-document" contentEditable suppressContentEditableWarning><h2>CV Editor</h2><p>Edit your CV content here.</p></article>{showConflictModal && <div className="conflict-backdrop" role="dialog" aria-modal="true" aria-labelledby="conflict-title"><div className="conflict-modal"><h3 id="conflict-title">This CV changed elsewhere. Reload latest version.</h3><p>Reload to continue editing with the newest content.</p><div className="conflict-actions"><button type="button" className="primary-btn" onClick={() => { setShowConflictModal(false); loadCv(); }}>Reload latest version</button><button type="button" className="secondary-btn" onClick={() => setShowConflictModal(false)}>Close</button></div></div></div>}</section>}
+      {route === 'my-cvs' ? <CvListPage /> : <section className="cv-shell"><button type="button" className="save-pdf-button" onClick={handleSaveAsPdf} aria-label="Save as PDF" title="Save as PDF"><MdOutlineSaveAs className="save-pdf-icon" /></button><div className="editor-toolbar"><button type="button" className="secondary-btn" onClick={() => saveCv('manual_save')} disabled={!cvId}>Save</button><button type="button" className="secondary-btn" onClick={loadSnapshots} disabled={!cvId || isLoadingSnapshots}>{isLoadingSnapshots ? 'Loading snapshots…' : 'Snapshots'}</button><small>{saveState}</small></div>{toastMessage && <p>{toastMessage}</p>}{editorError && <p className="error-text">{editorError}</p>}<article ref={cvRef} className="cv-document" contentEditable suppressContentEditableWarning><h2>CV Editor</h2><p>Edit your CV content here.</p></article>{showSnapshotsModal && <div className="conflict-backdrop" role="dialog" aria-modal="true" aria-labelledby="snapshots-title"><div className="conflict-modal"><h3 id="snapshots-title">Snapshots</h3>{snapshots.length === 0 ? <p>No snapshots yet.</p> : <ul>{snapshots.map((snapshot) => <li key={snapshot.id}><span>{formatUpdatedAt(snapshot.createdAt)} ({snapshot.reason || 'unknown'})</span><button type="button" className="secondary-btn" onClick={() => restoreSnapshot(snapshot.id)}>Restore</button></li>)}</ul>}<div className="conflict-actions"><button type="button" className="secondary-btn" onClick={() => setShowSnapshotsModal(false)}>Close</button></div></div></div>}{showConflictModal && <div className="conflict-backdrop" role="dialog" aria-modal="true" aria-labelledby="conflict-title"><div className="conflict-modal"><h3 id="conflict-title">This CV changed elsewhere. Reload latest version.</h3><p>Reload to continue editing with the newest content.</p><div className="conflict-actions"><button type="button" className="primary-btn" onClick={() => { setShowConflictModal(false); loadCv(); }}>Reload latest version</button><button type="button" className="secondary-btn" onClick={() => setShowConflictModal(false)}>Close</button></div></div></div>}</section>}
     </main>
   );
 }

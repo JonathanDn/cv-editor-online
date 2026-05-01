@@ -126,6 +126,9 @@ const validatePayload = (payload, { requireTitle = false } = {}) => {
   if (payload.save_reason !== undefined && payload.save_reason !== 'manual_save' && payload.save_reason !== 'autosave') {
     return 'save_reason must be manual_save or autosave';
   }
+  if (payload.create_pre_restore !== undefined && typeof payload.create_pre_restore !== 'boolean') {
+    return 'create_pre_restore must be a boolean';
+  }
 
   return null;
 };
@@ -341,6 +344,37 @@ export const requestHandler = async (req, res) => {
         }
 
         cv.updatedAt = now;
+        return sendJson(res, 200, { data: toDto(cv) });
+      }
+
+      const snapshotsListMatch = pathname.match(/^\/api\/cvs\/([^/]+)\/snapshots$/);
+      if (snapshotsListMatch && method === 'GET') {
+        const cv = cvs.find((row) => row.id === snapshotsListMatch[1] && row.userId === userId);
+        if (!cv) return sendJson(res, 404, { error: 'Not found' });
+        const data = snapshots
+          .filter((row) => row.cvId === cv.id && row.userId === userId)
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          .map((row) => ({ id: row.id, createdAt: row.createdAt, reason: row.reason }));
+        return sendJson(res, 200, { data });
+      }
+
+      const restoreSnapshotMatch = pathname.match(/^\/api\/cvs\/([^/]+)\/restore-snapshot\/([^/]+)$/);
+      if (restoreSnapshotMatch && method === 'POST') {
+        const [, cvId, snapshotId] = restoreSnapshotMatch;
+        const cv = cvs.find((row) => row.id === cvId && row.userId === userId);
+        if (!cv) return sendJson(res, 404, { error: 'Not found' });
+        const snapshot = snapshots.find((row) => row.id === snapshotId && row.cvId === cvId && row.userId === userId);
+        if (!snapshot) return sendJson(res, 404, { error: 'Snapshot not found' });
+
+        const payload = await readJsonBody(req);
+        const err = validatePayload(payload, { requireTitle: false });
+        if (err) return sendJson(res, 400, { error: err });
+        if (payload.create_pre_restore) {
+          writeSnapshot({ cv, reason: 'pre_restore' });
+        }
+
+        cv.contentJson = snapshot.contentJson;
+        cv.updatedAt = new Date().toISOString();
         return sendJson(res, 200, { data: toDto(cv) });
       }
 
