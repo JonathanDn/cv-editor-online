@@ -26,6 +26,7 @@ const MAX_LIMIT = 100;
 const MAX_TAG_LENGTH = 60;
 const MAX_FOLDER_LENGTH = 80;
 const EXPORT_VERSION = '1.0';
+const STABLE_CV_SECTIONS = ['summary', 'skills', 'experience', 'education', 'projects', 'certifications', 'awards', 'publications', 'volunteering', 'languages', 'interests'];
 
 const cvs = [];
 let nextId = 1;
@@ -252,6 +253,44 @@ const normalizeContentBySection = (contentJson) => {
   return Object.keys(out).length ? out : { General: '' };
 };
 
+const normalizeStableContentJson = (contentJson) => {
+  const source = isPlainObject(contentJson) ? contentJson : {};
+  const normalized = {};
+  for (const section of STABLE_CV_SECTIONS) {
+    const value = source[section];
+    if (value === undefined) normalized[section] = [];
+    else normalized[section] = value;
+  }
+  for (const [key, value] of Object.entries(source)) {
+    if (!(key in normalized)) normalized[key] = value;
+  }
+  return normalized;
+};
+
+const buildRenderReadyTextPayload = (cv, userId, versionId = 'current') => {
+  const selectedContent = resolveVersion(cv, userId, versionId);
+  if (!selectedContent) return null;
+  const content_json = normalizeStableContentJson(selectedContent);
+  const by_section = normalizeContentBySection(content_json);
+  const section_order = [...STABLE_CV_SECTIONS, ...Object.keys(by_section).filter((key) => !STABLE_CV_SECTIONS.includes(key))];
+  const blocks = section_order
+    .map((sectionKey) => ({
+      section: sectionKey,
+      text: by_section[sectionKey] || flattenText(content_json[sectionKey])
+    }))
+    .filter((block) => block.text && block.text.trim().length > 0);
+  return {
+    cv_id: cv.id,
+    version_id: versionId,
+    title: cv.title,
+    target_role: cv.targetRole,
+    target_company: cv.targetCompany,
+    section_order,
+    text_blocks: blocks,
+    render_ready_text: blocks.map((block) => `${block.section.toUpperCase()}\n${block.text}`).join('\n\n')
+  };
+};
+
 const resolveVersion = (cv, userId, versionId) => {
   if (!versionId || versionId === 'current') return cv.contentJson;
   const snapshot = snapshots.find((row) => row.id === versionId && row.cvId === cv.id && row.userId === userId);
@@ -312,7 +351,7 @@ export const requestHandler = async (req, res) => {
           title: payload.title.trim(),
           targetRole: payload.targetRole || null,
           targetCompany: payload.targetCompany || null,
-          contentJson: payload.content_json ?? {},
+          contentJson: normalizeStableContentJson(payload.content_json ?? {}),
           contentText: payload.content_text ?? null,
           status: 'active',
           createdAt: now,
@@ -391,7 +430,7 @@ export const requestHandler = async (req, res) => {
         if (payload.title !== undefined) cv.title = payload.title.trim();
         if (payload.targetRole !== undefined) cv.targetRole = payload.targetRole;
         if (payload.targetCompany !== undefined) cv.targetCompany = payload.targetCompany;
-        if (payload.content_json !== undefined) cv.contentJson = payload.content_json;
+        if (payload.content_json !== undefined) cv.contentJson = normalizeStableContentJson(payload.content_json);
         if (payload.content_text !== undefined) cv.contentText = payload.content_text;
         if (payload.folder_id !== undefined) cv.folderId = payload.folder_id ?? 'inbox';
         cv.saveCount = (cv.saveCount || 0) + 1;
@@ -435,7 +474,7 @@ export const requestHandler = async (req, res) => {
           title: payload.title !== undefined ? payload.title.trim() : source.title,
           targetRole: payload.targetRole !== undefined ? payload.targetRole : source.targetRole,
           targetCompany: payload.targetCompany !== undefined ? payload.targetCompany : source.targetCompany,
-          contentJson: source.contentJson,
+          contentJson: normalizeStableContentJson(source.contentJson),
           contentText: source.contentText,
           status: 'active',
           createdAt: now,
@@ -478,7 +517,7 @@ export const requestHandler = async (req, res) => {
           title: parsed.cv.title.trim(),
           targetRole: parsed.cv.targetRole || null,
           targetCompany: parsed.cv.targetCompany || null,
-          contentJson: parsed.cv.content_json ?? {},
+          contentJson: normalizeStableContentJson(parsed.cv.content_json ?? {}),
           contentText: parsed.cv.content_text ?? null,
           status: 'active',
           createdAt: now,
@@ -568,6 +607,16 @@ export const requestHandler = async (req, res) => {
         const right = normalizeContentBySection(rightVersion);
         const sections = Array.from(new Set([...Object.keys(left), ...Object.keys(right)])).sort();
         return sendJson(res, 200, { data: { leftId, rightId, sections, normalized: { left, right } } });
+      }
+
+      const renderReadyMatch = pathname.match(/^\/api\/cvs\/([^/]+)\/render-ready-text$/);
+      if (renderReadyMatch && method === 'GET') {
+        const cv = cvs.find((row) => row.id === renderReadyMatch[1] && row.userId === userId);
+        if (!cv) return sendJson(res, 404, { error: 'Not found' });
+        const versionId = url.searchParams.get('version') || 'current';
+        const payload = buildRenderReadyTextPayload(cv, userId, versionId);
+        if (!payload) return sendJson(res, 404, { error: 'Version not found' });
+        return sendJson(res, 200, { data: payload });
       }
 
       const tagsMatch = pathname.match(/^\/api\/cvs\/([^/]+)\/tags\/([^/]+)$/);
