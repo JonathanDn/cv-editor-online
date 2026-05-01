@@ -9,6 +9,24 @@ npm run dev
 
 Then open the URL shown in your terminal (usually `http://localhost:5173`).
 
+## Run tests
+
+```bash
+npm test
+```
+
+If Playwright end-to-end tests fail with an error about a missing browser executable, install the browser binaries first:
+
+```bash
+npx playwright install chromium
+```
+
+If that download is blocked in your network (for example, 403 errors from `cdn.playwright.dev`), run only layout/unit tests locally and run E2E tests in an environment with browser-download access:
+
+```bash
+npm run test:layout
+```
+
 ## Vercel deploy
 
 This project is Vercel-ready and includes `vercel.json`.
