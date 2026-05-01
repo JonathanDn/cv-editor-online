@@ -221,3 +221,44 @@ test('Import/export JSON: exports payload and imports as tagged copy', async () 
 
   server.close();
 });
+
+test('Analytics: tracks lifecycle events, save failures, dashboard panels, and alert thresholds', async () => {
+  const server = createAppServer();
+  server.listen(0);
+  await once(server, 'listening');
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+
+  const created = await jsonReq(base, '/api/cvs', { method: 'POST', body: { title: 'Analytics CV' } });
+  const cvId = created.body.data.id;
+  const opened = await jsonReq(base, `/api/cvs/${cvId}`);
+  assert.equal(opened.status, 200);
+
+  const saved = await jsonReq(base, `/api/cvs/${cvId}`, { method: 'PUT', body: { title: 'Analytics CV v2', updated_at: opened.body.data.updatedAt } });
+  assert.equal(saved.status, 200);
+
+  const conflict = await jsonReq(base, `/api/cvs/${cvId}`, { method: 'PUT', body: { title: 'stale', updated_at: opened.body.data.updatedAt } });
+  assert.equal(conflict.status, 409);
+
+  const duplicated = await jsonReq(base, `/api/cvs/${cvId}/duplicate`, { method: 'POST', body: {} });
+  assert.equal(duplicated.status, 201);
+
+  const restored = await jsonReq(base, `/api/cvs/${cvId}/restore`, { method: 'POST' });
+  assert.equal(restored.status, 200);
+
+  const taxBad = await jsonReq(base, '/api/analytics/events', { method: 'POST', body: { event_name: 'cv_save' } });
+  assert.equal(taxBad.status, 400);
+
+  const taxGood = await jsonReq(base, '/api/analytics/events', { method: 'POST', body: { event_name: 'cv_saved', status: 'failure', error_code: 'SAVE_TIMEOUT', cv_id: cvId } });
+  assert.equal(taxGood.status, 202);
+
+  const dashboard = await jsonReq(base, '/api/analytics/dashboard');
+  assert.equal(dashboard.status, 200);
+  assert.equal(dashboard.body.data.panels.length, 3);
+  assert.ok(dashboard.body.data.panels.some((panel) => panel.id === 'save_success_rate'));
+  assert.ok(dashboard.body.data.panels.some((panel) => panel.id === 'duplicate_success_rate'));
+  assert.ok(dashboard.body.data.panels.some((panel) => panel.id === 'weekly_return_to_edit'));
+  assert.ok(dashboard.body.data.alerts.some((alert) => alert.id === 'save_failure_rate_elevated' && alert.threshold === 0.05));
+
+  server.close();
+});

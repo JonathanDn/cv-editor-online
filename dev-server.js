@@ -34,6 +34,8 @@ const snapshots = [];
 let nextSnapshotId = 1;
 const AUTOSAVE_SNAPSHOT_INTERVAL = 5;
 const SNAPSHOT_RETENTION_LIMIT = 20;
+const analyticsEvents = [];
+const dashboardAlerts = [{ id: 'save_failure_rate_elevated', metric: 'save_failure_rate', threshold: 0.05, window: '15m', severity: 'warning', enabled: true }];
 
 const sendJson = (res, status, body) => {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -256,6 +258,24 @@ const resolveVersion = (cv, userId, versionId) => {
   if (!snapshot) return null;
   return snapshot.contentJson;
 };
+const trackEvent = ({ eventName, userId, cvId = null, status = 'success', errorCode = null, meta = {} }) => {
+  analyticsEvents.push({ eventName, userId, cvId, status, errorCode, meta, occurredAt: new Date().toISOString() });
+};
+const normalizeAnalyticsEventName = (value) => (new Set(['cv_created', 'cv_saved', 'cv_duplicated', 'cv_opened', 'cv_restored']).has(value) ? value : null);
+const toDashboardPanels = (userId) => {
+  const rows = analyticsEvents.filter((row) => row.userId === userId);
+  const count = (name, status) => rows.filter((row) => row.eventName === name && (!status || row.status === status)).length;
+  const saveSuccess = count('cv_saved', 'success');
+  const saveFail = count('cv_saved', 'failure');
+  const dupSuccess = count('cv_duplicated', 'success');
+  const dupFail = count('cv_duplicated', 'failure');
+  const weeklyReturn = rows.filter((row) => row.eventName === 'cv_opened' && row.status === 'success').length;
+  return [
+    { id: 'save_success_rate', title: 'Save Success Rate', value: saveSuccess + saveFail ? saveSuccess / (saveSuccess + saveFail) : 1 },
+    { id: 'duplicate_success_rate', title: 'Duplicate Success', value: dupSuccess + dupFail ? dupSuccess / (dupSuccess + dupFail) : 1 },
+    { id: 'weekly_return_to_edit', title: 'Weekly Return-to-Edit', value: weeklyReturn }
+  ];
+};
 export const requestHandler = async (req, res) => {
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
@@ -263,6 +283,18 @@ export const requestHandler = async (req, res) => {
     const method = req.method || 'GET';
 
     const userId = getAuthUserId(req);
+    if (pathname.startsWith('/api/analytics')) {
+      if (!userId) return sendJson(res, 401, { error: 'Unauthorized' });
+      if (method === 'POST' && pathname === '/api/analytics/events') {
+        const payload = await readJsonBody(req);
+        const eventName = normalizeAnalyticsEventName(payload?.event_name);
+        if (!eventName) return sendJson(res, 400, { error: 'Unsupported event_name' });
+        trackEvent({ eventName, userId, cvId: payload?.cv_id ? String(payload.cv_id) : null, status: payload?.status === 'failure' ? 'failure' : 'success', errorCode: payload?.error_code || null, meta: isPlainObject(payload?.meta) ? payload.meta : {} });
+        return sendJson(res, 202, { ok: true });
+      }
+      if (method === 'GET' && pathname === '/api/analytics/dashboard') return sendJson(res, 200, { data: { panels: toDashboardPanels(userId), alerts: dashboardAlerts } });
+      return sendJson(res, 404, { error: 'Not found' });
+    }
 
     if (pathname.startsWith('/api/cvs')) {
       if (!userId) {
@@ -293,6 +325,7 @@ export const requestHandler = async (req, res) => {
           tags: []
         };
         cvs.push(cv);
+        trackEvent({ eventName: 'cv_created', userId, cvId: cv.id, status: 'success' });
         return sendJson(res, 201, { data: toDto(cv) });
       }
 
@@ -323,6 +356,7 @@ export const requestHandler = async (req, res) => {
         const cv = cvs.find((row) => row.id === idMatch[1] && row.userId === userId && !row.deletedAt);
         if (!cv) return sendJson(res, 404, { error: 'Not found' });
         cv.lastOpenedAt = new Date().toISOString();
+        trackEvent({ eventName: 'cv_opened', userId, cvId: cv.id, status: 'success' });
         return sendJson(res, 200, { data: toDto(cv) });
       }
 
@@ -331,12 +365,17 @@ export const requestHandler = async (req, res) => {
         if (!cv) return sendJson(res, 404, { error: 'Not found' });
         const payload = await readJsonBody(req);
         const err = validatePayload(payload, { requireTitle: false });
-        if (err) return sendJson(res, 400, { error: err });
+        if (err) {
+          trackEvent({ eventName: 'cv_saved', userId, cvId: cv.id, status: 'failure', errorCode: 'VALIDATION_ERROR' });
+          return sendJson(res, 400, { error: err });
+        }
         const clientRevision = payload.updated_at ?? payload.revision;
         if (!clientRevision) {
+          trackEvent({ eventName: 'cv_saved', userId, cvId: cv.id, status: 'failure', errorCode: 'MISSING_REVISION' });
           return sendJson(res, 400, { error: 'updated_at (or revision) is required' });
         }
         if (clientRevision !== cv.updatedAt) {
+          trackEvent({ eventName: 'cv_saved', userId, cvId: cv.id, status: 'failure', errorCode: 'CV_CONFLICT' });
           return sendJson(res, 409, {
             error: 'Conflict',
             code: 'CV_CONFLICT',
@@ -365,6 +404,7 @@ export const requestHandler = async (req, res) => {
           writeSnapshot({ cv, reason: 'autosave_checkpoint' });
         }
 
+        trackEvent({ eventName: 'cv_saved', userId, cvId: cv.id, status: 'success', meta: { saveReason } });
         return sendJson(res, 200, { data: toDto(cv) });
       }
 
@@ -409,6 +449,7 @@ export const requestHandler = async (req, res) => {
         };
         cvs.push(duplicated);
         duplicateGuards.set(guardKey, { cvId: duplicated.id, createdAtMs: nowMs });
+        trackEvent({ eventName: 'cv_duplicated', userId, cvId: duplicated.id, status: 'success', meta: { sourceCvId: sourceId } });
         return sendJson(res, 201, { data: toDto(duplicated) });
       }
 
@@ -498,6 +539,7 @@ export const requestHandler = async (req, res) => {
         }
 
         cv.updatedAt = now;
+        if (action === 'restore') trackEvent({ eventName: 'cv_restored', userId, cvId: cv.id, status: 'success' });
         return sendJson(res, 200, { data: toDto(cv) });
       }
 
