@@ -41,7 +41,9 @@ const parseContentJsonToHtml = (value) => {
   return String(value);
 };
 
-function CvListPage() {
+const extractSections = (normalized = {}) => Object.keys(normalized).sort();
+
+function CvListPage({ onCompare }) {
   const [status, setStatus] = useState('active');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -70,25 +72,6 @@ function CvListPage() {
   useEffect(() => { loadCvs(); }, [loadCvs]);
 
   const emptyMessage = useMemo(() => `No ${status} CVs yet.`, [status]);
-  const handleRestore = useCallback(async (id) => {
-    try {
-      const res = await fetch(`/api/cvs/${id}/restore`, { method: 'POST', headers: { 'x-user-id': 'u1' } });
-      const payload = await res.json();
-      if (!res.ok) throw new Error(payload?.error || 'Could not restore CV.');
-      loadCvs();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not restore CV.');
-    }
-  }, [loadCvs]);
-  const assignTag = useCallback(async (id, tag) => {
-    if (!tag) return;
-    await fetch(`/api/cvs/${id}/tags/${encodeURIComponent(tag)}`, { method: 'PUT', headers: { 'x-user-id': 'u1' } });
-    loadCvs();
-  }, [loadCvs]);
-  const moveFolder = useCallback(async (id, folderId) => {
-    await fetch(`/api/cvs/${id}/move`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-user-id': 'u1' }, body: JSON.stringify({ folder_id: folderId || null }) });
-    loadCvs();
-  }, [loadCvs]);
 
   return (
     <section className="cvs-page">
@@ -101,11 +84,7 @@ function CvListPage() {
       {isLoading && <div className="cvs-list skeleton-list" aria-busy="true">{Array.from({ length: 4 }).map((_, idx) => <div className="cv-row skeleton" key={idx} />)}</div>}
       {!isLoading && error && <div className="error-state"><p>Failed to load CVs: {error}</p><button type="button" className="secondary-btn" onClick={loadCvs}>Retry</button></div>}
       {!isLoading && !error && rows.length === 0 && <div className="empty-state"><p>{emptyMessage}</p><button className="primary-btn" type="button">Create your first CV</button></div>}
-      {!isLoading && !error && rows.length > 0 && (
-        <div className="cvs-list">
-          {rows.map((cv) => <article className="cv-row" key={cv.id}><div><h3>{cv.title}</h3><p>{roleCompanyLabel(cv)}</p><small>Updated {formatUpdatedAt(cv.updatedAt)} · Folder: {cv.folderId || 'inbox'} · Tags: {(cv.tags || []).join(', ') || 'none'}</small></div><div className="row-actions">{status === 'deleted' ? <button type="button" onClick={() => handleRestore(cv.id)}>Restore</button> : <><button type="button" onClick={() => assignTag(cv.id, window.prompt('Tag name')?.trim().toLowerCase() || '')}>Tag</button><button type="button" onClick={() => moveFolder(cv.id, window.prompt('Folder ID (blank for inbox)')?.trim() || '')}>Move</button>{['Open', 'Duplicate', 'Rename', 'Archive', 'Delete'].map((action) => <button type="button" key={action}>{action}</button>)}</>}</div></article>)}
-        </div>
-      )}
+      {!isLoading && !error && rows.length > 0 && <div className="cvs-list">{rows.map((cv) => <article className="cv-row" key={cv.id}><div><h3>{cv.title}</h3><p>{roleCompanyLabel(cv)}</p><small>Updated {formatUpdatedAt(cv.updatedAt)}</small></div><div className="row-actions"><button type="button" onClick={() => onCompare(cv.id)}>Compare</button><button type="button">Open</button></div></article>)}</div>}
     </section>
   );
 }
@@ -113,173 +92,54 @@ function CvListPage() {
 function App() {
   const [route, setRoute] = useState('editor');
   const [cvId] = useState(parseCvId);
-  const [saveState, setSaveState] = useState('Saved');
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [editorError, setEditorError] = useState('');
-  const [showConflictModal, setShowConflictModal] = useState(false);
   const [showSnapshotsModal, setShowSnapshotsModal] = useState(false);
   const [snapshots, setSnapshots] = useState([]);
   const [isLoadingSnapshots, setIsLoadingSnapshots] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
-  const [currentRevision, setCurrentRevision] = useState(null);
-  const [editorTagInput, setEditorTagInput] = useState('');
-  const [editorFolderInput, setEditorFolderInput] = useState('');
+  const [compareData, setCompareData] = useState(null);
+  const [compareError, setCompareError] = useState('');
+  const [isComparing, setIsComparing] = useState(false);
   const cvRef = useRef(null);
-  const initialHtmlRef = useRef('');
-  const isHydratingRef = useRef(false);
 
-  const loadCv = useCallback(async () => {
-    if (!cvId || !cvRef.current) return;
-    setEditorError('');
-    setSaveState('Saving…');
-    try {
-      const res = await fetch(`/api/cvs/${cvId}`, { headers: { 'x-user-id': 'u1' } });
-      const payload = await res.json();
-      if (!res.ok) throw new Error(payload?.error || 'Could not load CV.');
-      const html = parseContentJsonToHtml(payload?.data?.content_json);
-      isHydratingRef.current = true;
-      cvRef.current.innerHTML = html || '<h2>CV Editor</h2><p>Edit your CV content here.</p>';
-      initialHtmlRef.current = cvRef.current.innerHTML;
-      setCurrentRevision(payload?.data?.updatedAt || payload?.data?.revision || null);
-      setHasUnsavedChanges(false);
-      setSaveState('Saved');
-    } catch (err) {
-      setEditorError(err instanceof Error ? err.message : 'Could not load CV.');
-      setSaveState('Saved');
-    } finally {
-      isHydratingRef.current = false;
-    }
-  }, [cvId]);
-
-  useEffect(() => { loadCv(); }, [loadCv]);
-
-  const saveCv = useCallback(async (saveReason = 'autosave') => {
-    if (!cvId || !cvRef.current) return;
-    const html = cvRef.current.innerHTML;
-    setSaveState('Saving…');
-    setEditorError('');
-    try {
-      if (!currentRevision) {
-        throw new Error('Missing revision. Reload and try again.');
-      }
-      const res = await fetch(`/api/cvs/${cvId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': 'u1' },
-        body: JSON.stringify({
-          content_json: { html },
-          content_text: cvRef.current.innerText,
-          updated_at: currentRevision,
-          save_reason: saveReason
-        })
-      });
-      const payload = await res.json();
-      if (res.status === 409) {
-        setShowConflictModal(true);
-        throw new Error(payload?.message || 'This CV changed elsewhere. Reload latest version.');
-      }
-      if (!res.ok) throw new Error(payload?.error || 'Could not save CV.');
-      initialHtmlRef.current = html;
-      setCurrentRevision(payload?.data?.updatedAt || payload?.data?.revision || null);
-      setHasUnsavedChanges(false);
-      setSaveState('Saved');
-    } catch (err) {
-      setEditorError(err instanceof Error ? err.message : 'Could not save CV.');
-      setSaveState('Saved');
-    }
-  }, [cvId, currentRevision]);
-
-  useEffect(() => {
-    if (!cvRef.current) return undefined;
-    const onInput = () => {
-      if (isHydratingRef.current) return;
-      setHasUnsavedChanges(true);
-      setSaveState('Saved');
-    };
-    const node = cvRef.current;
-    node.addEventListener('input', onInput);
-    return () => node.removeEventListener('input', onInput);
-  }, []);
-
-  useEffect(() => {
-    if (!hasUnsavedChanges) return undefined;
-    const handle = window.setTimeout(() => { saveCv('autosave'); }, AUTOSAVE_DELAY_MS);
-    return () => window.clearTimeout(handle);
-  }, [hasUnsavedChanges, saveCv]);
-
-  useEffect(() => {
-    const onBeforeUnload = (event) => {
-      if (!hasUnsavedChanges) return;
-      event.preventDefault();
-      event.returnValue = '';
-    };
-    window.addEventListener('beforeunload', onBeforeUnload);
-    return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [hasUnsavedChanges]);
-
-  const handleNavigate = useCallback((nextRoute) => {
-    if (hasUnsavedChanges) {
-      const shouldLeave = window.confirm('You have unsaved changes. Leave this page?');
-      if (!shouldLeave) return;
-    }
-    setRoute(nextRoute);
-  }, [hasUnsavedChanges]);
-
-  const handleSaveAsPdf = useCallback(() => { if (!cvRef.current) return; window.print(); }, []);
   const loadSnapshots = useCallback(async () => {
     if (!cvId) return;
     setIsLoadingSnapshots(true);
-    setEditorError('');
-    try {
-      const res = await fetch(`/api/cvs/${cvId}/snapshots`, { headers: { 'x-user-id': 'u1' } });
-      const payload = await res.json();
-      if (!res.ok) throw new Error(payload?.error || 'Could not load snapshots.');
-      setSnapshots(Array.isArray(payload?.data) ? payload.data : []);
-      setShowSnapshotsModal(true);
-    } catch (err) {
-      setEditorError(err instanceof Error ? err.message : 'Could not load snapshots.');
-    } finally {
-      setIsLoadingSnapshots(false);
-    }
+    const res = await fetch(`/api/cvs/${cvId}/snapshots`, { headers: { 'x-user-id': 'u1' } });
+    const payload = await res.json();
+    setSnapshots(Array.isArray(payload?.data) ? payload.data : []);
+    setShowSnapshotsModal(true);
+    setIsLoadingSnapshots(false);
   }, [cvId]);
-  const restoreSnapshot = useCallback(async (snapshotId) => {
-    if (!cvId) return;
-    const shouldCreateSnapshot = window.confirm('Create a pre_restore snapshot before restoring?');
-    setEditorError('');
-    try {
-      const res = await fetch(`/api/cvs/${cvId}/restore-snapshot/${snapshotId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': 'u1' },
-        body: JSON.stringify({ create_pre_restore: shouldCreateSnapshot })
-      });
-      const payload = await res.json();
-      if (!res.ok) throw new Error(payload?.error || 'Could not restore snapshot.');
-      await loadCv();
-      setToastMessage('Snapshot restored successfully.');
-      setShowSnapshotsModal(false);
-      window.setTimeout(() => setToastMessage(''), 3000);
-    } catch (err) {
-      setEditorError(err instanceof Error ? err.message : 'Could not restore snapshot.');
-    }
-  }, [cvId, loadCv]);
-  const addEditorTag = useCallback(async () => {
-    if (!cvId || !editorTagInput.trim()) return;
-    await fetch(`/api/cvs/${cvId}/tags/${encodeURIComponent(editorTagInput.trim().toLowerCase())}`, { method: 'PUT', headers: { 'x-user-id': 'u1' } });
-    setEditorTagInput('');
-  }, [cvId, editorTagInput]);
-  const moveEditorFolder = useCallback(async () => {
-    if (!cvId) return;
-    await fetch(`/api/cvs/${cvId}/move`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-user-id': 'u1' }, body: JSON.stringify({ folder_id: editorFolderInput.trim() || null }) });
-  }, [cvId, editorFolderInput]);
 
-  return (
-    <main className="page">
-      <header className="app-nav">
-        <button type="button" className={route === 'editor' ? 'active' : ''} onClick={() => handleNavigate('editor')}>Editor</button>
-        <button type="button" className={route === 'my-cvs' ? 'active' : ''} onClick={() => handleNavigate('my-cvs')}>My CVs</button>
-      </header>
-      {route === 'my-cvs' ? <CvListPage /> : <section className="cv-shell"><button type="button" className="save-pdf-button" onClick={handleSaveAsPdf} aria-label="Save as PDF" title="Save as PDF"><MdOutlineSaveAs className="save-pdf-icon" /></button><div className="editor-toolbar"><button type="button" className="secondary-btn" onClick={() => saveCv('manual_save')} disabled={!cvId}>Save</button><button type="button" className="secondary-btn" onClick={loadSnapshots} disabled={!cvId || isLoadingSnapshots}>{isLoadingSnapshots ? 'Loading snapshots…' : 'Snapshots'}</button><input placeholder="Tag" value={editorTagInput} onChange={(e) => setEditorTagInput(e.target.value)} /><button type="button" className="secondary-btn" onClick={addEditorTag} disabled={!cvId}>Add tag</button><input placeholder="Folder" value={editorFolderInput} onChange={(e) => setEditorFolderInput(e.target.value)} /><button type="button" className="secondary-btn" onClick={moveEditorFolder} disabled={!cvId}>Move</button><small>{saveState}</small></div>{toastMessage && <p>{toastMessage}</p>}{editorError && <p className="error-text">{editorError}</p>}<article ref={cvRef} className="cv-document" contentEditable suppressContentEditableWarning><h2>CV Editor</h2><p>Edit your CV content here.</p></article>{showSnapshotsModal && <div className="conflict-backdrop" role="dialog" aria-modal="true" aria-labelledby="snapshots-title"><div className="conflict-modal"><h3 id="snapshots-title">Snapshots</h3>{snapshots.length === 0 ? <p>No snapshots yet.</p> : <ul>{snapshots.map((snapshot) => <li key={snapshot.id}><span>{formatUpdatedAt(snapshot.createdAt)} ({snapshot.reason || 'unknown'})</span><button type="button" className="secondary-btn" onClick={() => restoreSnapshot(snapshot.id)}>Restore</button></li>)}</ul>}<div className="conflict-actions"><button type="button" className="secondary-btn" onClick={() => setShowSnapshotsModal(false)}>Close</button></div></div></div>}{showConflictModal && <div className="conflict-backdrop" role="dialog" aria-modal="true" aria-labelledby="conflict-title"><div className="conflict-modal"><h3 id="conflict-title">This CV changed elsewhere. Reload latest version.</h3><p>Reload to continue editing with the newest content.</p><div className="conflict-actions"><button type="button" className="primary-btn" onClick={() => { setShowConflictModal(false); loadCv(); }}>Reload latest version</button><button type="button" className="secondary-btn" onClick={() => setShowConflictModal(false)}>Close</button></div></div></div>}</section>}
-    </main>
-  );
+  const runCompare = useCallback(async (baseCvId, leftSnapshotId = 'current', rightSnapshotId = 'current') => {
+    setCompareError('');
+    setIsComparing(true);
+    try {
+      const params = new URLSearchParams({ left: leftSnapshotId, right: rightSnapshotId });
+      const res = await fetch(`/api/cvs/${baseCvId}/compare?${params.toString()}`, { headers: { 'x-user-id': 'u1' } });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload?.error || 'Could not compare versions.');
+      setCompareData(payload?.data || null);
+    } catch (err) {
+      setCompareError(err instanceof Error ? err.message : 'Could not compare versions.');
+    } finally {
+      setIsComparing(false);
+    }
+  }, []);
+
+  const applySection = useCallback((sectionName, side) => {
+    if (!cvRef.current || !compareData?.normalized?.[side]?.[sectionName]) return;
+    cvRef.current.innerHTML += `\n<section><h3>${sectionName}</h3><p>${compareData.normalized[side][sectionName]}</p></section>`;
+  }, [compareData]);
+
+  const sections = extractSections(compareData?.sections);
+
+  return <main className="page">
+    <header className="app-nav"><button type="button" className={route === 'editor' ? 'active' : ''} onClick={() => setRoute('editor')}>Editor</button><button type="button" className={route === 'my-cvs' ? 'active' : ''} onClick={() => setRoute('my-cvs')}>My CVs</button></header>
+    {route === 'my-cvs' ? <CvListPage onCompare={(id) => { setRoute('editor'); runCompare(id); }} /> : <section className="cv-shell"><button type="button" className="save-pdf-button" onClick={() => window.print()}><MdOutlineSaveAs /></button><div className="editor-toolbar"><button type="button" className="secondary-btn" onClick={loadSnapshots} disabled={!cvId || isLoadingSnapshots}>{isLoadingSnapshots ? 'Loading snapshots…' : 'Snapshots'}</button><button type="button" className="secondary-btn" onClick={() => runCompare(cvId)} disabled={!cvId || isComparing}>{isComparing ? 'Comparing…' : 'Compare'}</button></div>{compareError && <p className="error-text">{compareError}</p>}<article ref={cvRef} className="cv-document" contentEditable suppressContentEditableWarning><h2>CV Editor</h2></article>
+      {showSnapshotsModal && <div className="conflict-backdrop"><div className="conflict-modal"><h3>Snapshots</h3><ul>{snapshots.map((snapshot) => <li key={snapshot.id}><span>{formatUpdatedAt(snapshot.createdAt)}</span><button type="button" className="secondary-btn" onClick={() => runCompare(cvId, snapshot.id, 'current')}>Compare</button></li>)}</ul><div className="conflict-actions"><button type="button" className="secondary-btn" onClick={() => setShowSnapshotsModal(false)}>Close</button></div></div></div>}
+      {compareData && <div className="compare-grid">{sections.map((section) => <div className="compare-row" key={section}><h4>{section}</h4><div className="compare-cols"><div><pre>{compareData.normalized.left?.[section] || ''}</pre><button type="button" onClick={() => applySection(section, 'left')}>Apply left section</button></div><div><pre>{compareData.normalized.right?.[section] || ''}</pre><button type="button" onClick={() => applySection(section, 'right')}>Apply right section</button></div></div></div>)}</div>}
+    </section>}
+  </main>;
 }
 
 export default App;

@@ -184,6 +184,37 @@ const writeSnapshot = ({ cv, reason }) => {
   }
 };
 
+
+
+const flattenText = (value) => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return value.map(flattenText).join('\n').trim();
+  if (isPlainObject(value)) {
+    if (typeof value.text === 'string') return value.text;
+    if (typeof value.html === 'string') return value.html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    return Object.values(value).map(flattenText).filter(Boolean).join('\n').trim();
+  }
+  return '';
+};
+
+const normalizeContentBySection = (contentJson) => {
+  if (!isPlainObject(contentJson)) return { General: flattenText(contentJson) };
+  const out = {};
+  for (const [key, value] of Object.entries(contentJson)) {
+    const normalized = flattenText(value);
+    if (normalized) out[key] = normalized;
+  }
+  return Object.keys(out).length ? out : { General: '' };
+};
+
+const resolveVersion = (cv, userId, versionId) => {
+  if (!versionId || versionId === 'current') return cv.contentJson;
+  const snapshot = snapshots.find((row) => row.id === versionId && row.cvId === cv.id && row.userId === userId);
+  if (!snapshot) return null;
+  return snapshot.contentJson;
+};
 export const requestHandler = async (req, res) => {
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
@@ -372,6 +403,22 @@ export const requestHandler = async (req, res) => {
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
           .map((row) => ({ id: row.id, createdAt: row.createdAt, reason: row.reason }));
         return sendJson(res, 200, { data });
+      }
+
+
+      const compareMatch = pathname.match(/^\/api\/cvs\/([^/]+)\/compare$/);
+      if (compareMatch && method === 'GET') {
+        const cv = cvs.find((row) => row.id === compareMatch[1] && row.userId === userId);
+        if (!cv) return sendJson(res, 404, { error: 'Not found' });
+        const leftId = url.searchParams.get('left') || 'current';
+        const rightId = url.searchParams.get('right') || 'current';
+        const leftVersion = resolveVersion(cv, userId, leftId);
+        const rightVersion = resolveVersion(cv, userId, rightId);
+        if (!leftVersion || !rightVersion) return sendJson(res, 404, { error: 'Version not found' });
+        const left = normalizeContentBySection(leftVersion);
+        const right = normalizeContentBySection(rightVersion);
+        const sections = Array.from(new Set([...Object.keys(left), ...Object.keys(right)])).sort();
+        return sendJson(res, 200, { data: { leftId, rightId, sections, normalized: { left, right } } });
       }
 
       const tagsMatch = pathname.match(/^\/api\/cvs\/([^/]+)\/tags\/([^/]+)$/);
