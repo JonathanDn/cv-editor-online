@@ -108,16 +108,45 @@ test('My CVs renders and duplicate action is visible', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Duplicate' }).first()).toBeVisible();
 });
 
-test('editor autosave updates status indicator', async ({ page }) => {
+test('editor autosave shows conflict modal on stale revision conflict', async ({ page }) => {
+  await page.route('**/api/cvs/1', async (route) => {
+    const req = route.request();
+    if (req.method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: { id: '1', title: 'CV', content_json: { html: '<h2>CV Editor</h2>' }, updatedAt: '2026-05-01T00:00:00.000Z', revision: '2026-05-01T00:00:00.000Z' }
+        })
+      });
+      return;
+    }
+    if (req.method() === 'PUT') {
+      await route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: 'Conflict',
+          code: 'CV_CONFLICT',
+          guidance: 'Please refresh/reload to get the latest version before saving.',
+          latest: { updated_at: '2026-05-01T00:00:05.000Z', revision: '2026-05-01T00:00:05.000Z' }
+        })
+      });
+      return;
+    }
+    await route.continue();
+  });
+
   await page.goto('/?id=1');
   const doc = page.locator('.cv-document');
-  const status = page.locator('.editor-toolbar small');
-  await expect(status).toContainText('Saved');
+  const status = page.locator('.helper-text').last();
 
   await doc.click();
-  await page.keyboard.type('Autosave signal text');
-  await expect(status).toContainText('Saved');
-
+  await page.keyboard.type('Autosave conflict text');
   await page.waitForTimeout(7600);
-  await expect(status).toContainText('Saved');
+
+  await expect(page.getByRole('heading', { name: 'Conflict detected' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reload' })).toBeVisible();
+  await expect(page.locator('.helper-text')).not.toContainText('All changes saved');
+  await expect(status).toContainText('Unsaved changes');
 });
