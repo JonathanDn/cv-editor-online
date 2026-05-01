@@ -36,13 +36,25 @@ test('CV API CRUD, lifecycle, ownership and pagination', async () => {
   const id = created.body.data.id;
   const getOne = await jsonReq(base, `/api/cvs/${id}`);
   assert.equal(getOne.status, 200);
+  assert.ok(getOne.body.data.updatedAt);
+  assert.equal(getOne.body.data.revision, getOne.body.data.updatedAt);
 
   const forbiddenForOther = await jsonReq(base, `/api/cvs/${id}`, { userId: 'u2' });
   assert.equal(forbiddenForOther.status, 404);
 
-  const updated = await jsonReq(base, `/api/cvs/${id}`, { method: 'PUT', body: { title: 'Updated CV' } });
+  const updated = await jsonReq(base, `/api/cvs/${id}`, {
+    method: 'PUT',
+    body: { title: 'Updated CV', updated_at: getOne.body.data.updatedAt }
+  });
   assert.equal(updated.status, 200);
   assert.equal(updated.body.data.title, 'Updated CV');
+
+  const conflict = await jsonReq(base, `/api/cvs/${id}`, {
+    method: 'PUT',
+    body: { title: 'Stale Update', updated_at: getOne.body.data.updatedAt }
+  });
+  assert.equal(conflict.status, 409);
+  assert.equal(conflict.body.code, 'CV_CONFLICT');
 
   const archived = await jsonReq(base, `/api/cvs/${id}/archive`, { method: 'POST' });
   assert.equal(archived.body.data.status, 'archived');

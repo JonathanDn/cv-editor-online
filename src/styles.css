@@ -21,3 +21,8 @@
 .editor-toolbar{display:flex;align-items:center;gap:.6rem;margin:0 0 .7rem auto;justify-content:flex-end}
 .editor-toolbar small{color:var(--muted)}
 .error-text{color:#b42318;margin:0 0 .75rem}
+.conflict-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;padding:1rem;z-index:40}
+.conflict-modal{width:min(460px,100%);background:#fff;border:1px solid var(--border);border-radius:14px;padding:1rem 1.1rem}
+.conflict-modal h3{margin:.2rem 0 .4rem}
+.conflict-modal p{margin:0;color:var(--muted)}
+.conflict-actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem}

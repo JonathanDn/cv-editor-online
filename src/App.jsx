@@ -88,6 +88,8 @@ function App() {
   const [saveState, setSaveState] = useState('Saved');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [editorError, setEditorError] = useState('');
+  const [showConflictModal, setShowConflictModal] = useState(false);
+  const [currentRevision, setCurrentRevision] = useState(null);
   const cvRef = useRef(null);
   const initialHtmlRef = useRef('');
   const isHydratingRef = useRef(false);
@@ -104,6 +106,7 @@ function App() {
       isHydratingRef.current = true;
       cvRef.current.innerHTML = html || '<h2>CV Editor</h2><p>Edit your CV content here.</p>';
       initialHtmlRef.current = cvRef.current.innerHTML;
+      setCurrentRevision(payload?.data?.updatedAt || payload?.data?.revision || null);
       setHasUnsavedChanges(false);
       setSaveState('Saved');
     } catch (err) {
@@ -122,21 +125,33 @@ function App() {
     setSaveState('Saving…');
     setEditorError('');
     try {
+      if (!currentRevision) {
+        throw new Error('Missing revision. Reload and try again.');
+      }
       const res = await fetch(`/api/cvs/${cvId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'x-user-id': 'u1' },
-        body: JSON.stringify({ content_json: { html }, content_text: cvRef.current.innerText })
+        body: JSON.stringify({
+          content_json: { html },
+          content_text: cvRef.current.innerText,
+          updated_at: currentRevision
+        })
       });
       const payload = await res.json();
+      if (res.status === 409) {
+        setShowConflictModal(true);
+        throw new Error(payload?.message || 'This CV changed elsewhere. Reload latest version.');
+      }
       if (!res.ok) throw new Error(payload?.error || 'Could not save CV.');
       initialHtmlRef.current = html;
+      setCurrentRevision(payload?.data?.updatedAt || payload?.data?.revision || null);
       setHasUnsavedChanges(false);
       setSaveState('Saved');
     } catch (err) {
       setEditorError(err instanceof Error ? err.message : 'Could not save CV.');
       setSaveState('Saved');
     }
-  }, [cvId]);
+  }, [cvId, currentRevision]);
 
   useEffect(() => {
     if (!cvRef.current) return undefined;
@@ -182,7 +197,7 @@ function App() {
         <button type="button" className={route === 'editor' ? 'active' : ''} onClick={() => handleNavigate('editor')}>Editor</button>
         <button type="button" className={route === 'my-cvs' ? 'active' : ''} onClick={() => handleNavigate('my-cvs')}>My CVs</button>
       </header>
-      {route === 'my-cvs' ? <CvListPage /> : <section className="cv-shell"><button type="button" className="save-pdf-button" onClick={handleSaveAsPdf} aria-label="Save as PDF" title="Save as PDF"><MdOutlineSaveAs className="save-pdf-icon" /></button><div className="editor-toolbar"><button type="button" className="secondary-btn" onClick={saveCv} disabled={!cvId}>Save</button><small>{saveState}</small></div>{editorError && <p className="error-text">{editorError}</p>}<article ref={cvRef} className="cv-document" contentEditable suppressContentEditableWarning><h2>CV Editor</h2><p>Edit your CV content here.</p></article></section>}
+      {route === 'my-cvs' ? <CvListPage /> : <section className="cv-shell"><button type="button" className="save-pdf-button" onClick={handleSaveAsPdf} aria-label="Save as PDF" title="Save as PDF"><MdOutlineSaveAs className="save-pdf-icon" /></button><div className="editor-toolbar"><button type="button" className="secondary-btn" onClick={saveCv} disabled={!cvId}>Save</button><small>{saveState}</small></div>{editorError && <p className="error-text">{editorError}</p>}<article ref={cvRef} className="cv-document" contentEditable suppressContentEditableWarning><h2>CV Editor</h2><p>Edit your CV content here.</p></article>{showConflictModal && <div className="conflict-backdrop" role="dialog" aria-modal="true" aria-labelledby="conflict-title"><div className="conflict-modal"><h3 id="conflict-title">This CV changed elsewhere. Reload latest version.</h3><p>Reload to continue editing with the newest content.</p><div className="conflict-actions"><button type="button" className="primary-btn" onClick={() => { setShowConflictModal(false); loadCv(); }}>Reload latest version</button><button type="button" className="secondary-btn" onClick={() => setShowConflictModal(false)}>Close</button></div></div></div>}</section>}
     </main>
   );
 }
