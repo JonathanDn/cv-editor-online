@@ -17,3 +17,7 @@
 .empty-state,.error-state{background:#fff;border:1px dashed var(--border);padding:1.4rem;border-radius:12px;text-align:center}
 .skeleton{height:80px;background:linear-gradient(90deg,#eceff4,#f8f9fb,#eceff4);background-size:200% 100%;animation: shimmer 1.1s infinite}
 @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+.editor-toolbar{display:flex;align-items:center;gap:.6rem;margin:0 0 .7rem auto;justify-content:flex-end}
+.editor-toolbar small{color:var(--muted)}
+.error-text{color:#b42318;margin:0 0 .75rem}
