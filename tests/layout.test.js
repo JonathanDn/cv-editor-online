@@ -5,61 +5,48 @@ import { readFileSync } from 'node:fs';
 const appSource = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8');
 const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
 
-test('names containers for profile, contact, and experience sections', () => {
-  assert.match(appSource, /className="profile-container hero"/);
-  assert.match(appSource, /data-testid="profile-container"/);
-  assert.match(appSource, /className="contact-container left-column"/);
-  assert.match(appSource, /data-testid="contact-container"/);
-  assert.match(appSource, /className="experience-container right-column"/);
-  assert.match(appSource, /data-testid="experience-container"/);
-  assert.match(appSource, /className="panel additional-section"/);
-  assert.match(appSource, /data-testid="additional-section"/);
+test('renders My CVs route with active, archived, and deleted tabs', () => {
+  assert.match(appSource, /<h1>My CVs<\/h1>/);
+  assert.match(appSource, /\{ key: 'active', label: 'Active' \}/);
+  assert.match(appSource, /\{ key: 'archived', label: 'Archived' \}/);
+  assert.match(appSource, /\{ key: 'deleted', label: 'Deleted' \}/);
 });
 
-test('includes six experience entries in the template', () => {
-  const jobEntries = appSource.match(/<div className="job">/g) ?? [];
-  assert.equal(jobEntries.length, 6);
+test('shows loading, error, empty, and populated list states for My CVs', () => {
+  assert.match(appSource, /aria-busy="true"/);
+  assert.match(appSource, /Failed to load CVs:/);
+  assert.match(appSource, /No \$\{status\} CVs yet\./);
+  assert.match(appSource, /\['Open', 'Duplicate', 'Rename', 'Archive', 'Delete'\]/);
 });
 
-test('keeps contact and experience side-by-side on default layout width', () => {
-  assert.match(
-    stylesSource,
-    /\.content-grid\s*\{[\s\S]*?display:\s*grid;[\s\S]*?grid-template-columns:\s*31%\s*69%;/
-  );
+test('supports deleted-list restore action', () => {
+  assert.match(appSource, /\/api\/cvs\/\$\{id\}\/restore/);
+  assert.match(appSource, />Restore<\/button>/);
 });
 
-test('collapses to single column only at the mobile breakpoint', () => {
-  assert.match(
-    stylesSource,
-    /@media\s*\(width <= 760px\)\s*\{[\s\S]*?\.content-grid\s*\{[\s\S]*?grid-template-columns:\s*1fr;/
-  );
+test('implements autosave and unsaved changes safeguards', () => {
+  assert.match(appSource, /const AUTOSAVE_DELAY_MS = 7000;/);
+  assert.match(appSource, /window\.setTimeout\(\(\) => \{ saveCv\('autosave'\); \}, AUTOSAVE_DELAY_MS\)/);
+  assert.match(appSource, /window\.addEventListener\('beforeunload', onBeforeUnload\)/);
+  assert.match(appSource, /You have unsaved changes\. Leave this page\?/);
 });
 
-test('places the additional section beneath the two-column grid', () => {
-  assert.match(
-    appSource,
-    /<section className="content-grid"[\s\S]*?<\/section>\s*<section className="panel additional-section"/
-  );
-  assert.match(stylesSource, /\.additional-section\s*\{[\s\S]*?margin-top:\s*1\.7rem;/);
+test('handles optimistic concurrency conflicts with reload modal', () => {
+  assert.match(appSource, /if \(res\.status === 409\)/);
+  assert.match(appSource, /This CV changed elsewhere\. Reload latest version\./);
+  assert.match(appSource, /Reload latest version<\/button>/);
 });
 
-test('preserves two-column layout in print/PDF output', () => {
-  assert.match(stylesSource, /@media print\s*\{/);
-  assert.match(
-    stylesSource,
-    /@media print\s*\{[\s\S]*?\.cv-document\s*\{[\s\S]*?width:\s*210mm;[\s\S]*?height:\s*297mm;/
-  );
-  assert.match(
-    stylesSource,
-    /@media print\s*\{[\s\S]*?\.content-grid\s*\{[\s\S]*?grid-template-columns:\s*31%\s*69%;/
-  );
-  assert.match(
-    stylesSource,
-    /@media print\s*\{[\s\S]*?\.left-column\s*\{[\s\S]*?border-right:\s*1px solid var\(--divider\);/
-  );
+test('includes snapshot list and restore workflow', () => {
+  assert.match(appSource, /\/api\/cvs\/\$\{cvId\}\/snapshots/);
+  assert.match(appSource, /\/api\/cvs\/\$\{cvId\}\/restore-snapshot\/\$\{snapshotId\}/);
+  assert.match(appSource, /Create a pre_restore snapshot before restoring\?/);
+  assert.match(appSource, /Snapshot restored successfully\./);
 });
 
-
-test('preserves existing localStorage fields when saving', () => {
-  assert.match(appSource, /\.\.\.existingData/);
+test('defines core My CVs layout styles', () => {
+  assert.match(stylesSource, /\.cvs-page\{/);
+  assert.match(stylesSource, /\.cvs-header\{/);
+  assert.match(stylesSource, /\.status-chips\{/);
+  assert.match(stylesSource, /\.cv-row\{/);
 });
