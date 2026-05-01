@@ -29,6 +29,17 @@ const parseCvId = () => { const params = new URLSearchParams(window.location.sea
 const parseContentJsonToHtml = (value) => { if (value === null || value === undefined) return ''; if (typeof value === 'string') return value; if (Array.isArray(value)) return value.join(''); if (typeof value === 'object') { if (typeof value.html === 'string') return value.html; if (typeof value.content === 'string') return value.content; return JSON.stringify(value, null, 2); } return String(value); };
 const extractSections = (normalized = {}) => Object.keys(normalized).sort();
 
+
+const readJsonSafe = async (res) => {
+  try { return await res.json(); } catch { return null; }
+};
+
+const compactError = (fallback, payload) => {
+  const candidate = payload?.error || payload?.message || fallback;
+  const normalized = typeof candidate === 'string' ? candidate : fallback;
+  return normalized.length > 180 ? `${normalized.slice(0, 177)}...` : normalized;
+};
+
 function CvListPage({ onCompare, targetCvId, onSetTargetCv }) {
   const [status, setStatus] = useState('active');
   const [sort, setSort] = useState('recent');
@@ -47,8 +58,8 @@ function CvListPage({ onCompare, targetCvId, onSetTargetCv }) {
       if (tagFilter) params.set('tag', tagFilter);
       if (folderFilter) params.set('folder_id', folderFilter);
       const res = await fetch(`/api/cvs?${params.toString()}`, { headers: { 'x-user-id': 'u1' } });
-      const payload = await res.json();
-      if (!res.ok) throw new Error(payload?.error || 'Could not load CVs.');
+      const payload = await readJsonSafe(res);
+      if (!res.ok) throw new Error(compactError('Could not load CVs.', payload));
       setRows(Array.isArray(payload?.data) ? payload.data : []);
       setSelectedIds([]);
     } catch (err) { setError(err instanceof Error ? err.message : 'Could not load CVs.'); }
@@ -71,9 +82,9 @@ function CvListPage({ onCompare, targetCvId, onSetTargetCv }) {
       headers: { 'content-type': 'application/json', 'x-user-id': 'u1' },
       body: JSON.stringify({ ids: selectedIds })
     });
-    const payload = await res.json();
+    const payload = await readJsonSafe(res);
     if (!res.ok) {
-      setError(payload?.error || `Could not ${action}.`);
+      setError(compactError(`Could not ${action}.`, payload));
       return;
     }
     loadCvs();
@@ -112,8 +123,8 @@ function App() { /* unchanged */
   const [showConflictModal, setShowConflictModal] = useState(false);
   const cvRef = useRef(null);
   const fileInputRef = useRef(null);
-  const loadSnapshots = useCallback(async () => { if (!cvId) return; setIsLoadingSnapshots(true); const res = await fetch(`/api/cvs/${cvId}/snapshots`, { headers: { 'x-user-id': 'u1' } }); const payload = await res.json(); setSnapshots(Array.isArray(payload?.data) ? payload.data : []); setShowSnapshotsModal(true); setIsLoadingSnapshots(false); }, [cvId]);
-  const runCompare = useCallback(async (baseCvId, leftSnapshotId = 'current', rightSnapshotId = 'current') => { setCompareError(''); setIsComparing(true); try { const params = new URLSearchParams({ left: leftSnapshotId, right: rightSnapshotId }); const res = await fetch(`/api/cvs/${baseCvId}/compare?${params.toString()}`, { headers: { 'x-user-id': 'u1' } }); const payload = await res.json(); if (res.status === 409) { setShowConflictModal(true); throw new Error('Conflict detected'); } if (!res.ok) throw new Error(payload?.error || 'Could not compare versions.'); setCompareData(payload?.data || null);} catch (err) { setCompareError(err instanceof Error ? err.message : 'Could not compare versions.'); } finally { setIsComparing(false); } }, []);
+  const loadSnapshots = useCallback(async () => { if (!cvId) return; setIsLoadingSnapshots(true); const res = await fetch(`/api/cvs/${cvId}/snapshots`, { headers: { 'x-user-id': 'u1' } }); const payload = await readJsonSafe(res); setSnapshots(Array.isArray(payload?.data) ? payload.data : []); setShowSnapshotsModal(true); setIsLoadingSnapshots(false); }, [cvId]);
+  const runCompare = useCallback(async (baseCvId, leftSnapshotId = 'current', rightSnapshotId = 'current') => { setCompareError(''); setIsComparing(true); try { const params = new URLSearchParams({ left: leftSnapshotId, right: rightSnapshotId }); const res = await fetch(`/api/cvs/${baseCvId}/compare?${params.toString()}`, { headers: { 'x-user-id': 'u1' } }); const payload = await readJsonSafe(res); if (res.status === 409) { setShowConflictModal(true); throw new Error('Conflict detected'); } if (!res.ok) throw new Error(compactError('Could not compare versions.', payload)); setCompareData(payload?.data || null);} catch (err) { setCompareError(err instanceof Error ? err.message : 'Could not compare versions.'); } finally { setIsComparing(false); } }, []);
   const applySection = useCallback((sectionName, side) => { if (!cvRef.current || !compareData?.normalized?.[side]?.[sectionName]) return; cvRef.current.innerHTML += `
 <section><h3>${sectionName}</h3><p>${compareData.normalized[side][sectionName]}</p></section>`; }, [compareData]);
 
@@ -136,8 +147,8 @@ function App() { /* unchanged */
   const exportJson = useCallback(async () => {
     if (!cvId) return;
     const res = await fetch(`/api/cvs/${cvId}/export/json`, { headers: { 'x-user-id': 'u1' } });
-    const payload = await res.json();
-    if (!res.ok) { setImportMessage(payload?.error || 'Export failed.'); return; }
+    const payload = await readJsonSafe(res);
+    if (!res.ok) { setImportMessage(compactError('Export failed.', payload)); return; }
     const blob = new Blob([JSON.stringify(payload.data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -158,9 +169,9 @@ function App() { /* unchanged */
         headers: { 'content-type': 'application/json', 'x-user-id': 'u1' },
         body: JSON.stringify(parsed)
       });
-      const payload = await res.json();
+      const payload = await readJsonSafe(res);
       if (!res.ok) {
-        setImportMessage(payload?.message || payload?.error || 'Import failed.');
+        setImportMessage(compactError('Import failed.', payload));
         return;
       }
       setImportMessage(`Imported as a new CV copy: "${payload.data.title}"`);
